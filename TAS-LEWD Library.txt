@@ -1,0 +1,2827 @@
+/* ============================================================================
+   TAS-LEWD – Designed by Craxxer through Chat GPT
+   Based on:
+   // TRUE AUTOMATIC STATS (TAS) SCRIPT by Yi1i1i
+   // jackoneill2443 - Idea for input flavor text to show stat results
+   // BinKompliziert - Idea for Capitalization weighting for skill learning
+   // LewdLeah - General Scripting Knowledge
+   //
+============================================================================ */
+
+/* ---------------------------------------------------------------------------
+   LANGUAGE / DETECTION ARRAYS
+--------------------------------------------------------------------------- */
+
+var combatContextWords = [
+  "attack","attacks","attacked","strike","strikes","struck","hit","hits","slams","slammed",
+  "lashes out","lashes","whips","pounces","lunges","grabs","grabs you","seizes you",
+  "trap","traps","snare","ensnare","ensnares","ambush","ambushes",
+  "blast","erupts","explosion","assault","onslaught",
+  "counter","counterattack","enemy turn",
+  "chases","chasing","pursues","pursuing","presses the advantage"
+];
+
+var attackWords = [
+  "kiss","caress","stroke","grope","fondle","massage","tease","spank",
+  "thrust","thrusts","thrusting","finger","fingers","fingering",
+  "grind","rub","suck","lick","nibble","bite","ride","mount",
+  "edge","stimulate","pet","grip","pin","tie","dominate","command",
+  "tickle","fuck","pump","breed","rail","pleasure","work over"
+];
+
+var climaxWords = [
+  "orgasm","orgasms","climax","climaxes","cum","cums","cumming",
+  "release","releases","peaking","peaks"
+];
+
+var strongLustWords = [ "overwhelmed","on the verge of climax","completely undone","reduced to a trembling" ];
+var mediumLustWords = [ "moans","moaning","whimpers","whimpering","panting","heated","sensual" ];
+var lightLustWords  = [ "blushes","blushing","tingle","tingling","shiver","shivers","flustered" ];
+
+var playerActionVerbs = [
+  "use","uses","using",
+  "cast","casts","casting",
+  "perform","performs","performing",
+  "activate","activates","activating",
+  "fire","fires","firing",
+  "shoot","shoots","shooting",
+  "launch","launches","launching",
+  "hurl","hurls","hurling",
+  "fling","flings","flinging",
+  "unleash","unleashes","unleashing",
+  "channel","channels","channeling",
+  "send","sends","sending",
+  "release","releases","releasing",
+  "blast","blasts","blasting",
+  "fuck","fucks","fucking","thrust","thrusts","thrusting","finger","fingers","fingering",
+  "tease","teases","teasing","tickle","tickles","tickling"
+];
+
+var selectionVerbs = [ "select","selected","selecting","choose","chooses","choosing","pick","picks","picking" ];
+
+var classContextWords = [
+  "class","classes","select a class","choose a class","picked a class",
+  "class list","combat classes","class selection confirmed","please select a class",
+  "class options","options materialize"
+];
+
+var classMenuPhrases = [
+  "please select a class",
+  "class options materialize",
+  "several class options",
+  "below the message, several class options",
+  "your class options",
+  "combat classes:",
+  "select a class.",
+  "your options materialize"
+];
+
+var classConfirmPhrases = [
+  "class selection confirmed",
+  "class selected",
+  "class selected:",
+  "class confirmed",
+  "class confirmed.",
+  "class confirmed:"
+];
+
+/* Encounter nouns (hard gate) */
+var encounterNouns = [
+  "enemy","enemies",
+  "creature","creatures",
+  "monster","monsters",
+  "opponent","opponents",
+  "foe","foes",
+  "intruder","intruders",
+  "stranger","strangers",
+  "beast","beasts",
+  "entity","entities",
+  "humanoid","humanoids"
+];
+
+/* Scene cues (must indicate presence/spotting) */
+var encounterSceneCues = [
+  "you see","you spot","you notice","you catch sight","you glimpse","you find",
+  "there is","there are","ahead of you","in the distance","before you","nearby","in the chamber","in the room",
+  "stands","standing","waiting","lurking","writhing","moves","moving","approaches","approaching",
+  "slides","sliding","slithers","slithering","crawls","crawling","steps","stepping",
+  "cluster of","group of","pack of","pair of","trio of","circle of"
+];
+
+/* “Active threat intent” cues */
+var encounterThreatCues = [
+  "predatory","hungry","intent","hostile","aggressive","fixated on you",
+  "closing in","gaining on you","surges forward","rushes toward you",
+  "lashes out","lunges","pounces","attacks","chases","pursues"
+];
+
+/* Defeat / aftermath cues */
+var defeatedReferenceCues = [
+  "defeated","exhausted","motionless","limp","collapsed","cooling","puddles","puddle",
+  "remnants","residue","where they fell","left behind","cooling gelatin","corpse","bodies"
+];
+
+/* Environment exclusions */
+var encounterEnvironmentExclusions = [
+  "wall","walls","floor","ceiling","corridor","hallway","chamber","room","cave",
+  "air","scent","smell","aroma","pheromone","pheromones","mist","fog","cloud","aura",
+  "membrane","stone","moss","dripping","bioluminescent","light","glow"
+];
+
+/* Creature type keywords */
+var creatureTypeKeywords = [
+  "slime","slime girl","slime creature","succubus","incubus","minotaur","lamia","harpy","arachne",
+  "catgirl","bunnygirl","demon","ghost","tentacle","tentacles","blob","amoeba"
+];
+
+/* Base attacks (skill-less) */
+var baseAttackTriggers = [
+  "tickle","tease","grope","caress","kiss","spank","grind","ride","fuck","breed","edge",
+  "fondle","stroke","thrust","finger"
+];
+
+/* Rest / recovery cues (outside combat) */ 
+
+/* Descriptor vocabulary for targeting */
+var TARGET_COLORS = ["blue","pink","purple","green","red","black","white","clear","gold","silver"];
+var TARGET_SIZES  = ["small","tiny","little","large","huge","massive","towering","big"];
+var TARGET_GENDERS= ["female","male","futanari","futa","woman","man","girl","boy"];
+
+/* ---------------------------------------------------------------------------
+   BASES + TUNING
+--------------------------------------------------------------------------- */
+
+var BASE_RESOURCE = 100;          // Human baseline max for Lust/Stamina/Mana
+var ENEMY_TURN_MAX_TOTAL_LUST = 34;
+var ENEMY_TURN_PER_ENEMY_MIN = 6;
+var ENEMY_TURN_PER_ENEMY_MAX = 16;
+var ENEMY_TURN_MULTI_SCALE = 0.80;
+var PLAYER_AOE_DAMAGE_SCALE = 0.78;
+
+/* ---------------------------------------------------------------------------
+   UTILS
+--------------------------------------------------------------------------- */
+
+function tasClamp(v,min,max){ if(v<min) return min; if(v>max) return max; return v; }
+function tasToFixed(n,d){ return Number(n).toFixed(d); }
+function safeLower(s){ return (s||"").toLowerCase(); }
+function randInt(min,maxInclusive){ return Math.floor(Math.random()*(maxInclusive-min+1))+min; }
+function escRe(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); }
+
+function tasContainsAny(textLower, arr){
+  for(var i=0;i<arr.length;i++){
+    if(textLower.indexOf(arr[i].toLowerCase())!==-1) return true;
+  }
+  return false;
+}
+
+function cleanSkillName(raw){
+  if(!raw) return "";
+  var name=String(raw).trim();
+
+  // Drop trailing clauses like "- Cost: ..." or "(Cost: ...)"
+  name = name.replace(/\s*[-–—].*$/,"").replace(/\s*\(.*$/,"").trim();
+
+  // Normalize punctuation/spaces so commands like "Lust Bolt 1." still match
+  name = name.replace(/[^\w\s]/g," ").replace(/\s+/g," ").trim();
+
+  // If the last token is purely a number (e.g., "Lust Bolt 1"), drop it for matching
+  name = name.replace(/\s+\d+$/,"").trim();
+
+  return name;
+}
+
+/* Skills ONLY tag full name */
+function fullNameKey(name){
+  var n=(name||"").trim().toLowerCase();
+  return n ? [n] : [];
+}
+
+function toTitleCase(s){
+  return (s||"").replace(/\w\S*/g,function(t){return t.charAt(0).toUpperCase()+t.substr(1).toLowerCase();});
+}
+
+/* ---------------------------------------------------------------------------
+   STATE
+--------------------------------------------------------------------------- */
+
+function tasEnsureState(){
+  if(typeof state==="undefined"||!state) state={};
+  if(!state.players) state.players={};
+  if(!state.playerList) state.playerList=[];
+  if(!state.deadPlrs) state.deadPlrs=[];
+  if(!state.turnCount) state.turnCount=0;
+
+  if(!state.encounter) state.encounter={enemies:[]};
+  if(!state.lastTurn) state.lastTurn={playerActed:false,enemyActedInOutput:false};
+
+  if(!state.combat) state.combat={ status:"OUT_OF_COMBAT", lastResolution:"", hadEnemies:false };
+  if(state.combat.hadEnemies===undefined) state.combat.hadEnemies=false;
+
+  if(!state.targeting) state.targeting={ targetId:null, targetLabel:"" };
+
+  if(!state.recentlyDefeated) state.recentlyDefeated=[]; // [{nameLower, ttl}]
+  if(!state.flags) state.flags={};
+  if(state.flags.forceEncounterScan===undefined) state.flags.forceEncounterScan=false;
+
+  // NEW: one-turn context injections for newly learned skills
+  if(!state.ctxInject) state.ctxInject={ skillLines:[] };
+}
+
+function tasTickRecentlyDefeated(){
+  if(!state.recentlyDefeated) state.recentlyDefeated=[];
+  for(var i=state.recentlyDefeated.length-1;i>=0;i--){
+    state.recentlyDefeated[i].ttl -= 1;
+    if(state.recentlyDefeated[i].ttl<=0) state.recentlyDefeated.splice(i,1);
+  }
+}
+
+function wasRecentlyDefeatedName(nameLower){
+  if(!nameLower) return false;
+  for(var i=0;i<state.recentlyDefeated.length;i++){
+    if(state.recentlyDefeated[i].nameLower===nameLower) return true;
+  }
+  return false;
+}
+
+function markRecentlyDefeated(enemyName){
+  var nl=(enemyName||"").toLowerCase();
+  if(!nl) return;
+  state.recentlyDefeated.push({nameLower:nl, ttl:6});
+}
+
+/* ---------------------------------------------------------------------------
+   STAT SYSTEM
+--------------------------------------------------------------------------- */
+/*
+  Human baseline:
+    all stats = 10
+    => max lust/stam/mana = 100
+    => regen stats = 10 (OUT OF COMBAT)
+*/
+function recomputeDerivedPoolsNew(s){
+  s.maxLust = Math.max(20, Math.round(50 + 2.5 * ((s.endu||0) + (s.will||0))));
+  s.maxStam = Math.max(20, Math.round(50 + 2.5 * ((s.endu||0) + (s.might||0))));
+  s.maxMana = Math.max(20, Math.round(50 + 2.5 * ((s.will||0) + (s.cha||0))));
+
+  s.stamRegen = Math.max(0, Math.round(5 + 0.25 * ((s.might||0) + (s.dex||0))));
+  s.manaRegen = Math.max(0, Math.round(5 + 0.25 * ((s.cun||0) + (s.cha||0))));
+  s.lustRegen = Math.max(0, Math.round(5 + 0.25 * ((s.cun||0) + (s.dex||0)))); // reduces lust
+
+  s.lust = tasClamp(s.lust, 0, s.maxLust);
+  s.stam = tasClamp(s.stam, 0, s.maxStam);
+  s.mana = tasClamp(s.mana, 0, s.maxMana);
+}
+
+/* ---------------------------------------------------------------------------
+   ARCHETYPES
+--------------------------------------------------------------------------- */
+
+var ARCHETYPES = {
+  "A": { name:"Warrior",     up:["might","endu"], down:["cun","cha"] },
+  "B": { name:"Rogue",       up:["dex","endu"],   down:["will","cha"] },
+  "C": { name:"Entertainer", up:["dex","cha"],    down:["might","will"] },
+  "D": { name:"Paladin",     up:["will","endu"],  down:["cun","dex"] },
+  "E": { name:"Warlock",     up:["cha","will"],   down:["might","dex"] },
+  "F": { name:"Scholarly",   up:["cun","will"],   down:["might","endu"] }
+};
+
+function applyArchetypeToStats(s, code){
+  var a=ARCHETYPES[code];
+  if(!a) return;
+  if(!s._baseSnapshot){
+    s._baseSnapshot = { endu:s.endu, dex:s.dex, might:s.might, will:s.will, cun:s.cun, cha:s.cha };
+  }
+  var b=s._baseSnapshot;
+
+  s.endu=b.endu; s.dex=b.dex; s.might=b.might; s.will=b.will; s.cun=b.cun; s.cha=b.cha;
+
+  for(var i=0;i<a.up.length;i++){
+    var k=a.up[i]; s[k]=Math.round((s[k]||0)*1.2*10)/10;
+  }
+  for(var j=0;j<a.down.length;j++){
+    var d=a.down[j]; s[d]=Math.round((s[d]||0)*0.8*10)/10;
+  }
+}
+
+function inferArchetypeFromClassName(clsLower){
+  if(!clsLower) return null;
+
+  if(/(fighter|warrior|breeder|dominatrix|domme|knight|lust knight|conqueror)/.test(clsLower)) return "A";
+  if(/(rogue|dancer|tease|trickster|acrobat|fuckdoll|nimble|sneak)/.test(clsLower)) return "B";
+  if(/(bard|seducer|courtesan|performer|idol|temptress|vixen|muse)/.test(clsLower)) return "C";
+  if(/(paladin|masochist|chainwarden|warden|saint|devout|flagellant|guardian)/.test(clsLower)) return "D";
+  if(/(warlock|sorcerer|siren|enchanter|hexer|witch|temptation mage|succubus)/.test(clsLower)) return "E";
+  if(/(mage|wizard|corrupter|whisperer|scholar|alchemist|researcher|loremaster)/.test(clsLower)) return "F";
+
+  return null;
+}
+
+/* ---------------------------------------------------------------------------
+   PLAYER CREATION
+--------------------------------------------------------------------------- */
+
+function tasEnsureStateAndPlayer(){
+  tasEnsureState();
+  if(state.playerList.length===0) tasCreateNewPlayer("Player");
+  else for(var i=0;i<state.playerList.length;i++) tasCreateNewPlayer(state.playerList[i]);
+}
+
+function tasCreateNewPlayer(plrName){
+  tasEnsureState();
+  if(!state.players[plrName]) state.players[plrName]={};
+  var plr=state.players[plrName];
+
+  if(!plr.race) plr.race="human";
+  if(!plr.class_) plr.class_="N/A";
+  if(!plr.archetype) plr.archetype="N/A";
+
+  if(!plr.stats) plr.stats={};
+  var s=plr.stats;
+
+  s.lvl=s.lvl||1; s.exp=s.exp||0;
+  s.classLvl=s.classLvl||1; s.classExp=s.classExp||0;
+  s.orgasms=s.orgasms||0;
+  s.statPoints = s.statPoints||0;
+
+  if(s.endu===undefined) s.endu=10;
+  if(s.dex===undefined) s.dex=10;
+  if(s.might===undefined) s.might=10;
+  if(s.will===undefined) s.will=10;
+  if(s.cun===undefined) s.cun=10;
+  if(s.cha===undefined) s.cha=10;
+
+  if(s.lust===undefined) s.lust=0;
+
+  if(!s._baseSnapshot){
+    s._baseSnapshot = { endu:s.endu, dex:s.dex, might:s.might, will:s.will, cun:s.cun, cha:s.cha };
+  }
+
+  if(plr.archetype && plr.archetype!=="N/A" && ARCHETYPES[plr.archetype]){
+    applyArchetypeToStats(s, plr.archetype);
+  }
+
+  recomputeDerivedPoolsNew(s);
+
+  if(s.stam===undefined) s.stam=s.maxStam;
+  if(s.mana===undefined) s.mana=s.maxMana;
+
+  s.stam=tasClamp(s.stam,0,s.maxStam);
+  s.mana=tasClamp(s.mana,0,s.maxMana);
+
+  if(!plr.buffs) plr.buffs={};     // buffs on player
+  if(!plr.debuffs) plr.debuffs={}; // debuffs on player
+
+  if(!plr.skills) plr.skills={
+    name:[],tag:[],tier:[],lvl:[],uses:[],keys:[],effect:[],costStam:[],costMana:[]
+  };
+
+  if(state.playerList.indexOf(plrName)===-1) state.playerList.push(plrName);
+}
+
+/* ---------------------------------------------------------------------------
+   STORY CARDS
+--------------------------------------------------------------------------- */
+
+function tasHasStoryCards(){ return typeof storyCards!=="undefined" && storyCards; }
+
+function tasGetOrCreateStatsCard(plrName){
+  if(!tasHasStoryCards()) return null;
+  var title=plrName+" Stats";
+  var sc=storyCards.find(function(c){return c.title===title;});
+  if(!sc){
+    addStoryCard(title,"Blank","Player Stats");
+    sc=storyCards.find(function(c){return c.title===title;});
+  }
+
+  // Ensure the card's TRIGGERS/KEYS include common UI words so the model can always find it.
+  // Requested words (comma-separated concept): character, menu, stats, stat, status, sheet
+  var desired=["character","menu","stats","stat","status","sheet"];
+  if(sc){
+    if(Array.isArray(sc.keys)){
+      for(var i=0;i<desired.length;i++){
+        if(sc.keys.indexOf(desired[i])<0) sc.keys.push(desired[i]);
+      }
+    }else if(typeof sc.keys==="string"){
+      var cur=sc.keys.split(/\s*,\s*/).filter(function(x){return x;});
+      for(var j=0;j<desired.length;j++){
+        if(cur.indexOf(desired[j])<0) cur.push(desired[j]);
+      }
+      sc.keys=cur.join(", ");
+    }else{
+      sc.keys=desired.join(", ");
+    }
+  }
+  return sc;
+}
+
+function tasGetOrCreateSkillsCard(plrName){
+  if(!tasHasStoryCards()) return null;
+  var title=plrName+" Skills";
+  var sc=storyCards.find(function(c){return c.title===title;});
+  if(!sc){
+    addStoryCard(title,"Blank","Player Stats");
+    sc=storyCards.find(function(c){return c.title===title;});
+    if(sc){
+      sc.description=
+        "Skills for "+plrName+".\n\nFORMAT:\n"+
+        "Skill: Name (Tag Physical/Magical/Hybrid/AoE/Debuff/General) (Tier T1/T2/T3) (Lvl X.YY) (Uses N) (Cost: # Stamina, # Mana) (Keys: full skill name) - Description\n"+
+        "NOTE: Keys are ONLY the full skill name (lowercase).\n";
+      sc.entry=sc.entry||"";
+    }
+  }
+  return sc;
+}
+
+function tasGetOrCreateEncounterCard(){
+  if(!tasHasStoryCards()) return null;
+  var title="Encounter";
+  var sc=storyCards.find(function(c){return c.title===title;});
+  if(!sc){
+    addStoryCard(title,"Blank","Player Stats");
+    sc=storyCards.find(function(c){return c.title===title;});
+    if(sc){
+      sc.description=
+        "Active enemies / NPCs.\nFORMAT:\n"+
+        "Enemy: Name (#) (Type TYPE) (Lvl N) Lust X/Y, Stamina A/B (Status: ACTIVE/NEAR CLIMAX/EXHAUSTED) - Short description\n"+
+        "Effects: Aphrodisiac x3; Restrained x1; ... (optional)\n\n"+
+        "IMPORTANT:\n"+
+        "- Lust FILLS as they take lust-pressure.\n"+
+        "- A climax happens when Lust reaches MAX (then Lust drops partially).\n"+
+        "- A creature is only defeated when Stamina reaches 0.\n";
+      sc.entry=sc.entry||"";
+    }
+  }
+  return sc;
+}
+
+function tasGetOrCreateCombatStateCard(){
+  if(!tasHasStoryCards()) return null;
+  var title="Combat State";
+  var sc=storyCards.find(function(c){return c.title===title;});
+  if(!sc){
+    addStoryCard(title,"Blank","Player Stats");
+    sc=storyCards.find(function(c){return c.title===title;});
+    if(sc){
+      sc.description=
+        "Combat mode and resolution.\n"+
+        "When Status is OUT_OF_COMBAT, the story should transition away from turn-based combat.\n";
+      sc.entry=sc.entry||"";
+    }
+  }
+  return sc;
+}
+
+function formatEffectsLine(map){
+  var keys=[];
+  for(var k in map){
+    if(map.hasOwnProperty(k) && map[k]>0) keys.push(k+" x"+map[k]);
+  }
+  return keys.length ? ("Effects: "+keys.join("; ")) : "";
+}
+
+function storeStatsToSC(){
+  tasEnsureStateAndPlayer();
+  if(!tasHasStoryCards()) return;
+
+  state.playerList.forEach(function(plrName){
+    var plr=state.players[plrName]; if(!plr||!plr.stats) return;
+    var sc=tasGetOrCreateStatsCard(plrName); if(!sc) return;
+    var s=plr.stats;
+
+    recomputeDerivedPoolsNew(s);
+
+    var buffsLine=formatEffectsLine(plr.buffs||{});
+    var debuffsLine=formatEffectsLine(plr.debuffs||{});
+
+    sc.entry=
+      "Race: "+plr.race+"\n"+
+      "Class: "+plr.class_+"\n"+
+      "Archetype: "+(plr.archetype||"N/A")+(ARCHETYPES[plr.archetype]?" ("+ARCHETYPES[plr.archetype].name+")":"")+"\n"+
+      "LVL "+s.lvl+" (Exp: "+tasToFixed(s.exp,1)+")\n"+
+      "Class LVL "+(s.classLvl||1)+" (Class Exp: "+tasToFixed(s.classExp||0,1)+")\n"+
+      "Stat Points: "+(s.statPoints||0)+"\\n"+
+      "Lust: "+tasToFixed(s.lust,1)+"/"+tasToFixed(s.maxLust,1)+"\n"+
+      "Stamina: "+tasToFixed(s.stam,1)+"/"+tasToFixed(s.maxStam,1)+"\n"+
+      "Mana: "+tasToFixed(s.mana,1)+"/"+tasToFixed(s.maxMana,1)+"\n"+
+      "Stamina Regen (OOC): "+tasToFixed(s.stamRegen||0,1)+" (In-combat: "+tasToFixed(Math.max(0,Math.floor((s.stamRegen||0)/10)),1)+")\n"+
+      "Mana Regen (OOC): "+tasToFixed(s.manaRegen||0,1)+" (In-combat: "+tasToFixed(Math.max(0,Math.floor((s.manaRegen||0)/10)),1)+")\n"+
+      "Lust Regen (OOC): "+tasToFixed(s.lustRegen||0,1)+" (In-combat: "+tasToFixed(Math.max(0,Math.floor((s.lustRegen||0)/10)),1)+")\n"+
+      "Endurance: "+tasToFixed(s.endu,1)+"\n"+
+      "Dexterity: "+tasToFixed(s.dex,1)+"\n"+
+      "Might: "+tasToFixed(s.might,1)+"\n"+
+      "Willpower: "+tasToFixed(s.will,1)+"\n"+
+      "Cunning: "+tasToFixed(s.cun,1)+"\n"+
+      "Charisma: "+tasToFixed(s.cha,1)+"\n"+
+      "Orgasms (this run): "+(s.orgasms||0)+"\n"+
+      (buffsLine?("\n"+buffsLine+"\n"):"")+
+      (debuffsLine?(debuffsLine+"\n"):"");
+  });
+}
+
+function storeSkillsToSC(){
+  tasEnsureStateAndPlayer();
+  if(!tasHasStoryCards()) return;
+
+  state.playerList.forEach(function(plrName){
+    var plr=state.players[plrName]; if(!plr||!plr.skills) return;
+    var sc=tasGetOrCreateSkillsCard(plrName); if(!sc) return;
+
+    var out=[];
+    for(var i=0;i<plr.skills.name.length;i++){
+      var nm=plr.skills.name[i]; if(!nm) continue;
+      var tag=plr.skills.tag[i]||"General";
+      var tier=plr.skills.tier[i]||"T1";
+      var lvl=(plr.skills.lvl[i]||1).toFixed(2);
+      var uses=plr.skills.uses[i]||0;
+
+      var cs=plr.skills.costStam[i]||0;
+      var cm=plr.skills.costMana[i]||0;
+
+      var costParts=[];
+      if(cs) costParts.push(cs+" Stamina");
+      if(cm) costParts.push(cm+" Mana");
+      var costText=costParts.length?costParts.join(", "):"0";
+
+      var key = nm.toLowerCase();
+      plr.skills.keys[i]=[key];
+
+      var desc=(plr.skills.effect[i]||"").trim();
+
+      out.push(
+        "Skill: "+nm+
+        " (Tag "+tag+")"+
+        " (Tier "+tier+")"+
+        " (Lvl "+lvl+")"+
+        " (Uses "+uses+")"+
+        " (Cost: "+costText+")"+
+        " (Keys: "+key+")"+
+        (desc?" - "+desc:"")
+      );
+    }
+    sc.entry=out.join("\n");
+  });
+}
+
+function enemyStatusLabel(e){
+  if(!e) return "ACTIVE";
+  if(e.stam<=0) return "EXHAUSTED";
+  var rL = (e.maxLust>0) ? (e.lust/e.maxLust) : 0;
+  if(rL>=0.80) return "NEAR CLIMAX";
+  return "ACTIVE";
+}
+
+function storeEncounterToSC(){
+  if(!tasHasStoryCards()) return;
+  tasEnsureState();
+
+  var sc=tasGetOrCreateEncounterCard(); if(!sc) return;
+  var enc=state.encounter;
+
+  var out=[];
+  for(var i=0;i<enc.enemies.length;i++){
+    var e=enc.enemies[i]; if(!e) continue;
+    out.push(
+      "Enemy: "+e.name+" ("+(i+1)+")"+
+      " (Type "+e.type+")"+
+      " (Lvl "+e.lvl+")"+
+      " Lust "+tasToFixed(e.lust,1)+"/"+tasToFixed(e.maxLust,1)+","+
+      " Stamina "+tasToFixed(e.stam,1)+"/"+tasToFixed(e.maxStam,1)+
+      " (Status: "+enemyStatusLabel(e)+")"+
+      " - "+(e.desc||"")
+    );
+    var effLine = formatEffectsLine(e.effects||{});
+    if(effLine) out.push(effLine);
+  }
+  sc.entry=out.join("\n");
+}
+
+function storeCombatStateToSC(){
+  if(!tasHasStoryCards()) return;
+  var sc=tasGetOrCreateCombatStateCard(); if(!sc) return;
+  sc.entry =
+    "Status: "+(state.combat.status||"OUT_OF_COMBAT")+"\n"+
+    "Had Enemies This Combat: "+(state.combat.hadEnemies? "YES":"NO")+"\n"+
+    "Last Resolution: "+(state.combat.lastResolution||"")+"\n"+
+    "Target: "+(state.targeting.targetLabel||"")+"\n";
+}
+
+/* ---------------------------------------------------------------------------
+   LOAD SKILLS FROM SC
+--------------------------------------------------------------------------- */
+
+function lewdSkillsLoadFromSC(){
+  tasEnsureStateAndPlayer();
+  if(!tasHasStoryCards()) return;
+
+  state.playerList.forEach(function(plrName){
+    var plr=state.players[plrName]; if(!plr) return;
+    var sc=tasGetOrCreateSkillsCard(plrName);
+    if(!sc||!sc.entry||!sc.entry.trim()) return;
+
+    var re=/^Skill\s*:\s*(.+?)\s*\(Tag\s+([^)]+)\)\s*\(Tier\s+([^)]+)\)\s*\(Lvl\s*([0-9]+(?:\.[0-9]+)?)\)\s*\(Uses\s*([0-9]+)\)\s*\(Cost:\s*([^)]+)\)\s*\(Keys:\s*([^)]+)\)\s*(?:-\s*(.+))?$/i;
+
+    var N=[],T=[],R=[],L=[],U=[],K=[],E=[],CS=[],CM=[];
+    sc.entry.split(/\r?\n/).forEach(function(rawLine){
+      var line=(rawLine||"").trim(); if(!line) return;
+      var m=re.exec(line); if(!m) return;
+
+      var name=cleanSkillName(m[1]||""); if(!name) return;
+      var tag=(m[2]||"General").trim();
+      var tier=(m[3]||"T1").trim();
+
+      var lvl=parseFloat(m[4]); if(isNaN(lvl)) lvl=1;
+      var uses=parseInt(m[5],10); if(isNaN(uses)) uses=0;
+
+      var costStr=(m[6]||"").toLowerCase();
+      var cs=0,cm=0;
+      var ms=costStr.match(/([0-9]+)\s*(stamina|sta)\b/); if(ms) cs=parseInt(ms[1],10)||0;
+      var mm=costStr.match(/([0-9]+)\s*mana\b/); if(mm) cm=parseInt(mm[1],10)||0;
+
+      var keys=[(name||"").toLowerCase()];
+      var desc=(m[8]||"").trim();
+
+      N.push(name);T.push(tag);R.push(tier);L.push(lvl);U.push(uses);
+      K.push(keys);E.push(desc);CS.push(cs);CM.push(cm);
+    });
+
+    if(N.length){
+      plr.skills.name=N; plr.skills.tag=T; plr.skills.tier=R; plr.skills.lvl=L; plr.skills.uses=U;
+      plr.skills.keys=K; plr.skills.effect=E; plr.skills.costStam=CS; plr.skills.costMana=CM;
+    }
+  });
+}
+
+/* ---------------------------------------------------------------------------
+   MENUS
+--------------------------------------------------------------------------- */
+
+function textLooksLikeClassMenu(lower){
+  if(tasContainsAny(lower, classMenuPhrases)) return true;
+  var hasNumbered = /\n\s*\d+[.)]\s+/.test(lower) || /^\s*\d+[.)]\s+/.test(lower);
+  if(hasNumbered && tasContainsAny(lower, classContextWords)) return true;
+  if(lower.indexOf("please select a class")!==-1) return true;
+  return false;
+}
+
+function textHasClassConfirmed(lower){
+  if(tasContainsAny(lower, classConfirmPhrases)) return true;
+  if(lower.indexOf("class selection confirmed")!==-1) return true;
+  if(lower.indexOf("class selected")!==-1) return true;
+  return false;
+}
+
+function textLooksLikeSkillMenu(lower){
+  var hasNumbered = /\n\s*\d+[.)]\s+/.test(lower) || /^\s*\d+[.)]\s+/.test(lower);
+  if(!hasNumbered) return false;
+  if(lower.indexOf("list of skills")!==-1) return true;
+  if(lower.indexOf("skills available")!==-1) return true;
+  if(lower.indexOf("new class")!==-1 && lower.indexOf("skills")!==-1) return true;
+  if(lower.indexOf("options")!==-1 && lower.indexOf("skills")!==-1) return true;
+  return false;
+}
+
+/* ---------------------------------------------------------------------------
+   CLIMAX + STAMINA LOSS
+--------------------------------------------------------------------------- */
+
+function lustRemainAfterClimax(maxLust, stam, maxStam){
+  var r = (maxStam>0) ? tasClamp(stam/maxStam, 0, 1) : 0;
+  var pct = tasClamp(0.15 + 0.70*(1-r), 0.15, 0.85);
+  return Math.max(0, Math.floor(maxLust * pct));
+}
+
+function staminaLossOnClimax(maxStam, hitThatCausedClimax){
+  var ratio = (maxStam>0) ? tasClamp(hitThatCausedClimax / maxStam, 0, 1) : 0;
+  var pct = tasClamp(0.10 + 0.40*ratio, 0.10, 0.50);
+  return Math.max(1, Math.ceil(maxStam * pct));
+}
+
+/* ---------------------------------------------------------------------------
+   CLASS SET + ARCHETYPE AUTO
+--------------------------------------------------------------------------- */
+
+function tasMaybeInferClassFromText(text){
+  tasEnsureStateAndPlayer();
+  var plr=state.players[state.playerList[0]];
+  if(!plr) return false;
+
+  function cap(re){
+    var m=re.exec(text);
+    if(!m||!m[1]) return null;
+    var val=m[1].trim().replace(/[.,;:!?]+$/,"");
+    return val||null;
+  }
+
+  var cls=null;
+  if(!cls) cls=cap(/class selected:?[\s]+([A-Za-z][A-Za-z0-9 _-]{0,40})/i);
+  if(!cls) cls=cap(/\byou\s+(?:select|selected|choose|chose|pick|picked)\s+([A-Za-z][A-Za-z0-9 _-]{0,40})\s+(?:as\s+)?(?:your|the)\s+class\b/i);
+  if(!cls) cls=cap(/\/addclass\s+([A-Za-z][A-Za-z0-9 _-]{0,40})/i);
+  if(!cls) return false;
+
+  var cleaned=cls.replace(/\s+as$/i,"").trim();
+  var lower=cleaned.toLowerCase();
+  if(!cleaned||lower==="as"||lower==="your"||lower==="class") return false;
+
+  if(plr.class_ && plr.class_!=="N/A") return false;
+
+  plr.class_=cleaned;
+
+  var code=inferArchetypeFromClassName(lower);
+  if(code){
+    plr.archetype=code;
+    if(plr.stats && plr.stats._baseSnapshot){
+      applyArchetypeToStats(plr.stats, code);
+      recomputeDerivedPoolsNew(plr.stats);
+      plr.stats.stam=tasClamp(plr.stats.stam,0,plr.stats.maxStam);
+      plr.stats.mana=tasClamp(plr.stats.mana,0,plr.stats.maxMana);
+      plr.stats.lust=tasClamp(plr.stats.lust,0,plr.stats.maxLust);
+    }
+  } else {
+    plr.archetype="N/A";
+  }
+
+  return true;
+}
+
+/* ---------------------------------------------------------------------------
+   SKILLS: FACTORY + TAGGING + ADVANCED EFFECTS
+--------------------------------------------------------------------------- */
+
+function isGenericSkillName(nameLower){
+  if(!nameLower) return true;
+  if(nameLower==="the spell"||nameLower==="a spell"||nameLower==="the technique"||nameLower==="a technique"||nameLower==="the ability"||nameLower==="an ability") return true;
+  if(nameLower.length<4) return true;
+  return false;
+}
+
+function isAoEName(nameLower){
+  return /(aoe|area|all\s+enemies|everyone|entire|whole|room|chamber|zone|field|radius|circle|cone|spray|cloud|mist|fog|nova|wave|pulse|burst|storm|surge|shockwave|around\s+you|surrounding|envelop|envelops|fills\s+the\s+air|blankets\s+the\s+area|covers\s+the\s+room)/.test(nameLower);
+}
+
+function skillTagFromName(nameLower){
+  if(isAoEName(nameLower)) return "AoE";
+  if(/\btouch\b/.test(nameLower)) return "Hybrid";
+  if (/(bind|bondage|restrain|leash|tether|stun|hypno|charm|sleep|daze|silence|overload|impairs|curse|hex)/.test(nameLower)) return "Debuff";
+  if (/(bolt|blast|beam|ray|missile|orb|sigil|hex|curse|spell|incant|enchant|cloud|mist|pheromone|aura)/.test(nameLower)) return "Magical";
+  if (/(tickle|tease|caress|stroke|massage|grip|pin|spank|ride|grind|wrestle|hold|fuck|breed|thrust|finger)/.test(nameLower)) return "Physical";
+  return "General";
+}
+
+function skillTierFromName(nameLower){
+  if (/(greater|advanced|master|elite|overload|domination|cataclysm|unstoppable)/.test(nameLower)) return "T3";
+  if (/(empowered|improved|heavy|intense|focused|charged)/.test(nameLower)) return "T2";
+  return "T1";
+}
+
+function baselineCost(tag,tier){
+  var baseStam=0, baseMana=0;
+
+  if(tag==="Physical"){ baseStam=randInt(1,2); baseMana=randInt(1,3); }
+  else if(tag==="Magical"){ baseStam=0; baseMana=6; }
+  else if(tag==="Hybrid"){ baseStam=1; baseMana=5; }
+  else if(tag==="AoE"){ baseStam=0; baseMana=8; }
+  else if(tag==="Debuff"){ baseStam=1; baseMana=7; }
+  else { baseStam=1; baseMana=4; }
+
+  if(tier==="T2"){ baseStam+=1; baseMana+=2; }
+  if(tier==="T3"){ baseStam+=1; baseMana+=4; }
+
+  baseStam = tasClamp(baseStam,0,6);
+  baseMana = tasClamp(baseMana,0,30);
+  return { stam: baseStam, mana: baseMana };
+}
+
+/* Expanded effect inference */
+function inferAdvancedEffect(nameLower, effectLower){
+  effectLower = (effectLower||"").toLowerCase();
+  var combined = (nameLower||"") + " " + effectLower;
+  // Debuffs
+  if(/(aphrodisiac|pheromone|allure|scent|aroma)/.test(combined)) return "Aphrodisiac";
+  if(/(bind|bondage|restrain|leash|tether)/.test(combined)) return "Restrained";
+  if(/(overload|ecstasy|frenzy)/.test(combined)) return "Overstimulated";
+  if(/(lubricant|slick|slippery)/.test(combined)) return "Slippery";
+  if(/(weaken|cripple|sap|enfeeble)/.test(combined)) return "Weakened";
+  if(/(vulnerable|expose|open up|soften)/.test(combined)) return "Vulnerable";
+  if(/(drain|leech|siphon)/.test(combined)) return "Drained";
+
+  // Buffs (player-only application is supported if you later add self-target keywords)
+  if(/(focus|aim|steady|precision)/.test(combined)) return "Focused";
+  if(/(evasion|nimble|dodge|blur)/.test(combined)) return "Evasion";
+  if(/(guard|ward|shield)/.test(combined)) return "Guarded";
+  if(/(empower|surge|fury|amplify)/.test(combined)) return "Empowered";
+
+  return null;
+}
+
+function skillTypeForCombat(tag){
+  if(tag==="Physical") return "Physical";
+  if(tag==="Magical") return "Magical";
+  if(tag==="Hybrid") return "Hybrid";
+  if(tag==="AoE") return "Magical";
+  if(tag==="Debuff") return "Magical";
+  return "Physical";
+}
+
+function defaultSkillDescription(name,tag,tier,cost){
+  var cParts=[];
+  if(cost.stam) cParts.push(cost.stam+" Stamina");
+  if(cost.mana) cParts.push(cost.mana+" Mana");
+  var cText=cParts.length?cParts.join(", "):"0";
+
+  var desc="Cost: "+cText+". Effect: "+
+    (tag==="Physical"?"physical technique":tag==="Magical"?"lust spell":tag==="Hybrid"?"enchanted touch-technique":tag==="AoE"?"area technique":tag==="Debuff"?"control technique":"technique")+
+    " that builds an enemy’s lust.";
+
+  var adv=inferAdvancedEffect(name.toLowerCase(), "");
+  if(adv){
+    desc+=" Advanced: applies "+adv+" stacks on hit.";
+  }
+  return desc;
+}
+
+/* Queue context injection so the model sees the skill text immediately */
+function queueSkillContextInject(skillName, desc){
+  if(!state || !state.ctxInject) return;
+  var line="<< NEW SKILL: "+skillName+" >> "+(desc||"");
+  state.ctxInject.skillLines.push(line);
+  // keep it short
+  if(state.ctxInject.skillLines.length>3) state.ctxInject.skillLines.shift();
+}
+
+function ensureSkillFactory(plr,rawName){
+  if(!rawName) return {created:false,idx:-1};
+  var name=cleanSkillName(rawName); if(!name) return {created:false,idx:-1};
+
+  var lowerName=name.toLowerCase().trim();
+  if(isGenericSkillName(lowerName)) return {created:false,idx:-1};
+
+  var idx=-1;
+  for(var i=0;i<plr.skills.name.length;i++){
+    if(plr.skills.name[i].toLowerCase()===lowerName){ idx=i; break; }
+  }
+
+  if(idx>=0){
+    plr.skills.keys[idx]=fullNameKey(name);
+    return {created:false,idx:idx};
+  }
+
+  var tier=skillTierFromName(lowerName);
+  var tag=skillTagFromName(lowerName);
+  var cost=baselineCost(tag,tier);
+  var desc=defaultSkillDescription(name,tag,tier,cost);
+
+  plr.skills.name.push(name);
+  plr.skills.tag.push(tag);
+  plr.skills.tier.push(tier);
+  plr.skills.lvl.push(1);
+  plr.skills.uses.push(0);
+  plr.skills.keys.push(fullNameKey(name));
+  plr.skills.effect.push(desc);
+  plr.skills.costStam.push(cost.stam||0);
+  plr.skills.costMana.push(cost.mana||0);
+
+  queueSkillContextInject(name, desc);
+
+  return {created:true,idx:plr.skills.name.length-1};
+}
+
+function autoDetectSkillsFromContext(text){
+  tasEnsureStateAndPlayer();
+  if(!text||typeof text!=="string") return;
+
+  var plr=state.players[state.playerList[0]];
+  if(!plr) return;
+
+  var lower = safeLower(text);
+
+  if(textLooksLikeClassMenu(lower) && !textHasClassConfirmed(lower)) return;
+
+  var m;
+
+  var exp=/\bSkill\s*:\s*([A-Z][A-Za-z0-9 ']{2,})/g;
+  while((m=exp.exec(text))!==null) ensureSkillFactory(plr,m[1].trim());
+
+  var learnedColon=/\bskill\s+(?:learned|gained|unlocked|added)\s*:\s*([A-Z][A-Za-z0-9 ']{2,})/gi;
+  while((m=learnedColon.exec(text))!==null) ensureSkillFactory(plr,m[1].trim());
+
+  var learnSimple=/\byou\s+learn\s+([A-Z][A-Za-z0-9 ']{2,})\b/gi;
+  while((m=learnSimple.exec(text))!==null) ensureSkillFactory(plr,m[1].trim());
+
+  var classKnown = (plr.class_ && plr.class_ !== "N/A");
+  var allowStartingSkill = classKnown || textHasClassConfirmed(lower);
+
+  if(allowStartingSkill){
+    var startRe=/\bStarting\s+Skill\s*:\s*([A-Z][A-Za-z0-9 ']{2,})(?:\s*\([^)]*\))?/gi;
+    while((m=startRe.exec(text))!==null) ensureSkillFactory(plr,m[1].trim());
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   TARGETING (ORDINALS + DESCRIPTORS + NAME MATCH)
+--------------------------------------------------------------------------- */
+
+function parseOrdinalOrNumberToken(tok){
+  if(!tok) return null;
+  var t=safeLower(tok).trim();
+  t=t.replace(/[^\w-]/g,"");
+
+  if(/^\d+$/.test(t)){
+    var n=parseInt(t,10);
+    return isNaN(n)?null:n;
+  }
+
+  var ordMap={
+    "first":1,"1st":1,
+    "second":2,"2nd":2,
+    "third":3,"3rd":3,
+    "fourth":4,"4th":4,
+    "fifth":5,"5th":5,
+    "sixth":6,"6th":6
+  };
+  if(ordMap[t]) return ordMap[t];
+
+  var numMap={
+    "one":1,"two":2,"three":3,"four":4,"five":5,"six":6
+  };
+  if(numMap[t]) return numMap[t];
+
+  var map={"seven":7,"eight":8,"nine":9,"ten":10};
+  if(map[t]) return map[t];
+
+  return null;
+}
+
+function normalizeGenderToken(g){
+  g=safeLower(g||"");
+  if(g==="futa") return "futanari";
+  if(g==="woman"||g==="girl") return "female";
+  if(g==="man"||g==="boy") return "male";
+  return g;
+}
+
+function extractDescriptorTokens(lowerText){
+  var tokens={colors:[],sizes:[],genders:[]};
+  for(var i=0;i<TARGET_COLORS.length;i++){
+    if(lowerText.indexOf(TARGET_COLORS[i])!==-1) tokens.colors.push(TARGET_COLORS[i]);
+  }
+  for(var j=0;j<TARGET_SIZES.length;j++){
+    if(lowerText.indexOf(TARGET_SIZES[j])!==-1) tokens.sizes.push(TARGET_SIZES[j]);
+  }
+  for(var k=0;k<TARGET_GENDERS.length;k++){
+    if(lowerText.indexOf(TARGET_GENDERS[k])!==-1) tokens.genders.push(normalizeGenderToken(TARGET_GENDERS[k]));
+  }
+  return tokens;
+}
+
+function scoreEnemyByDescriptors(enemy, desc){
+  var n=safeLower(enemy.name||"");
+  var score=0;
+
+  desc.colors.forEach(function(c){ if(n.indexOf(c)!==-1) score+=3; });
+  desc.sizes.forEach(function(s){ if(n.indexOf(s)!==-1) score+=2; });
+  desc.genders.forEach(function(g){ if(n.indexOf(g)!==-1) score+=2; });
+
+  // slight bonus if enemy type keyword is referenced implicitly
+  if(n.indexOf("slime")!==-1 && (desc.colors.length||desc.sizes.length||desc.genders.length)) score+=1;
+
+  return score;
+}
+
+function setTargetIndexIfValid(idx1Based){
+  var enc=state.encounter;
+  var idx0=idx1Based-1;
+  if(idx0<0 || idx0>=enc.enemies.length) return false;
+  var e=enc.enemies[idx0];
+  if(!e || e.stam<=0) return false;
+  state.targeting.targetId=e.id;
+  state.targeting.targetLabel=e.name;
+  return true;
+}
+
+function setTargetByBestDescriptorMatch(rawLower){
+  var enc=state.encounter;
+  if(!enc.enemies.length) return false;
+
+  var desc=extractDescriptorTokens(rawLower);
+  var hasAny = desc.colors.length||desc.sizes.length||desc.genders.length;
+  if(!hasAny) return false;
+
+  var best=null, bestScore=0;
+  for(var i=0;i<enc.enemies.length;i++){
+    var e=enc.enemies[i];
+    if(!e || e.stam<=0) continue;
+    var s=scoreEnemyByDescriptors(e, desc);
+    if(s>bestScore){ bestScore=s; best=e; }
+  }
+  if(best && bestScore>=2){
+    state.targeting.targetId=best.id;
+    state.targeting.targetLabel=best.name;
+    return true;
+  }
+  return false;
+}
+
+function detectTargetFromText(text){
+  var lower=safeLower(text);
+
+  // Pattern: "second slime creature", "third blue slime", "fourth large monster"
+  var m = lower.match(/\b(?:the\s+)?(first|second|third|fourth|fifth|sixth|1st|2nd|3rd|4th|5th|6th|one|two|three|four|five|six|\d+)\s+((?:small|large|tiny|huge|massive|towering|big)\s+)?((?:blue|pink|purple|green|red|black|white|clear|gold|silver)\s+)?((?:female|male|futanari|futa)\s+)?(slime(?:\s+girl|\s+creature)?|creature|monster|enemy|opponent|foe)\b/);
+  if(m && m[1]){
+    var idx=parseOrdinalOrNumberToken(m[1]);
+    if(idx) return {type:"index", index:idx, alsoDesc: lower};
+  }
+
+  // Pattern: "enemy 2", "creature 3"
+  m = lower.match(/\b(?:enemy|creature|monster|opponent|foe)\s*(?:creature\s*)?(\d+)\b/);
+  if(m && m[1]){
+    var idx2=parseInt(m[1],10);
+    if(!isNaN(idx2) && idx2>0) return {type:"index", index:idx2, alsoDesc: lower};
+  }
+
+  // Pattern: "the blue slime", "the large pink slime girl", "the futanari slime"
+  m = lower.match(/\b(?:the\s+)?((?:small|large|tiny|huge|massive|towering|big)\s+)?((?:blue|pink|purple|green|red|black|white|clear|gold|silver)\s+)?((?:female|male|futanari|futa)\s+)?(slime(?:\s+girl|\s+creature)?|incubus|succubus|minotaur|lamia|harpy|arachne|blob|amoeba|monster|creature|enemy|opponent|foe)\b/);
+  if(m){
+    return {type:"descriptor", lower: lower};
+  }
+
+  return null;
+}
+
+function getTargetEnemyOrFirstAlive(){
+  var enc=state.encounter;
+
+  if(state.targeting && state.targeting.targetId){
+    for(var i=0;i<enc.enemies.length;i++){
+      var e=enc.enemies[i];
+      if(e && e.id===state.targeting.targetId && e.stam>0) return e;
+    }
+  }
+
+  for(var j=0;j<enc.enemies.length;j++){
+    if(enc.enemies[j] && enc.enemies[j].stam>0) return enc.enemies[j];
+  }
+  return null;
+}
+
+function getNthAliveEnemyAfter(enemy, n){
+  if(!enemy) return getTargetEnemyOrFirstAlive();
+  var startIndex=-1;
+  for(var i=0;i<state.encounter.enemies.length;i++){
+    if(state.encounter.enemies[i] && state.encounter.enemies[i].id===enemy.id){ startIndex=i; break; }
+  }
+  var found=0;
+  for(var j=startIndex+1;j<state.encounter.enemies.length;j++){
+    var e=state.encounter.enemies[j];
+    if(e && e.stam>0){
+      found++;
+      if(found>=n) return e;
+    }
+  }
+  return null;
+}
+
+/* ---------------------------------------------------------------------------
+   ENCOUNTER / ENEMY GENERATION (ENEMIES NERFED)
+--------------------------------------------------------------------------- */
+
+function enemyTypeFromText(lower){
+  if(lower.indexOf("slime girl")!==-1) return "Slime Girl";
+  if(lower.indexOf("slime")!==-1) return "Slime Creature";
+  if(lower.indexOf("blob")!==-1 || lower.indexOf("amoeba")!==-1) return "Amorphous Blob";
+  if(lower.indexOf("succub")!==-1||lower.indexOf("incub")!==-1) return "Succubus/Incubus";
+  if(lower.indexOf("minotaur")!==-1) return "Minotaur";
+  if(lower.indexOf("lamia")!==-1) return "Lamia";
+  if(lower.indexOf("harpy")!==-1) return "Harpy";
+  if(lower.indexOf("arachne")!==-1||lower.indexOf("spider")!==-1) return "Arachne";
+  if(lower.indexOf("catgirl")!==-1||lower.indexOf("nekomimi")!==-1) return "Catgirl";
+  if(lower.indexOf("bunny")!==-1||lower.indexOf("rabbit")!==-1) return "Bunnygirl";
+  if(lower.indexOf("demon")!==-1) return "Demon";
+  if(lower.indexOf("ghost")!==-1) return "Ghost";
+  if(lower.indexOf("tentacle")!==-1) return "Tentacle Creature";
+  return null;
+}
+
+function estimateGroupCount(lower){
+  var m=lower.match(/\b(\d+)\s+(?:enemies|creatures|monsters|foes|opponents|slimes|figures|people)\b/i);
+  if(m&&m[1]) return tasClamp(parseInt(m[1],10)||1,1,6);
+  if(/\bthree\b/.test(lower)||lower.indexOf("trio")!==-1) return 3;
+  if(/\btwo\b/.test(lower)||lower.indexOf("pair")!==-1) return 2;
+  if(/\bfour\b/.test(lower)) return 4;
+  if(/\bfive\b/.test(lower)) return 5;
+  if(lower.indexOf("cluster")!==-1 || lower.indexOf("group")!==-1 || lower.indexOf("pack")!==-1) return 3;
+  return 1;
+}
+
+function looksLikeEnvironmentOnly(lower){
+  if(lower.indexOf("slime")!==-1){
+    var hasNoun = tasContainsAny(lower, encounterNouns);
+    if(!hasNoun) return true;
+
+    if(lower.indexOf("slime around you")!==-1) return true;
+    if(lower.indexOf("slime surrounding you")!==-1) return true;
+    if(lower.indexOf("slime walls")!==-1 || lower.indexOf("slime wall")!==-1) return true;
+  }
+  return false;
+}
+
+function hasNounNearCreature(lower){
+  var nouns=encounterNouns;
+  var creatures=creatureTypeKeywords;
+  for(var i=0;i<nouns.length;i++){
+    var n=nouns[i].toLowerCase();
+    var idx=lower.indexOf(n);
+    if(idx===-1) continue;
+    var window=lower.substring(Math.max(0,idx-35), Math.min(lower.length,idx+35));
+    for(var j=0;j<creatures.length;j++){
+      if(window.indexOf(creatures[j].toLowerCase())!==-1) return true;
+    }
+  }
+  return tasContainsAny(lower, encounterThreatCues);
+}
+
+function parseEncounterParts(argStr){
+  var lower=safeLower(argStr||"").trim();
+  if(!lower) return null;
+
+  var parts=lower.split(",").map(function(s){return s.trim();}).filter(Boolean);
+  if(!parts.length) return null;
+
+  var out=[];
+
+  for(var i=0;i<parts.length;i++){
+    var p=parts[i].trim();
+    if(!p) continue;
+
+    var count=1, size="normal", color=null, gender=null, type=null;
+
+    var m=p.match(/\bx\s*(\d+)\b/);
+    if(m && m[1]){ count=tasClamp(parseInt(m[1],10)||1,1,12); p=p.replace(m[0],"").trim(); }
+
+    m=p.match(/^(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b/);
+    if(m && m[1]){
+      var n=parseOrdinalOrNumberToken(m[1]);
+      if(!n && /^\d+$/.test(m[1])) n=parseInt(m[1],10);
+      if(!n){
+        var map={"seven":7,"eight":8,"nine":9,"ten":10};
+        if(map[m[1]]) n=map[m[1]];
+      }
+      if(n) count=tasClamp(n,1,12);
+      p=p.replace(m[0],"").trim();
+    }
+
+    if(/\b(small|smaller|tiny|little)\b/.test(p)) size="small";
+    if(/\b(large|larger|towering|huge|massive)\b/.test(p)) size="large";
+
+    m=p.match(/\b(blue|pink|green|purple|black|white|clear|red|gold|silver)\b/);
+    if(m && m[1]) color=m[1];
+
+    if(/\bfutanari\b|\bfuta\b/.test(p)) gender="futanari";
+    else if(/\bfemale\b|\bwoman\b|\bgirl\b/.test(p)) gender="female";
+    else if(/\bmale\b|\bman\b|\bboy\b/.test(p)) gender="male";
+
+    var t = enemyTypeFromText(p);
+    if(!t){
+      if(/\bincubi\b/.test(p) || /\bincubus\b/.test(p) || /\bsuccubi\b/.test(p) || /\bsuccubus\b/.test(p)) t="Succubus/Incubus";
+      else if(/\bslime\b/.test(p) && /\bgirl(s)?\b/.test(p)) t="Slime Girl";
+      else if(/\bslime\b/.test(p)) t="Slime Creature";
+      else if(/\bminotaur(s)?\b/.test(p)) t="Minotaur";
+      else if(/\blamia(s)?\b/.test(p)) t="Lamia";
+      else if(/\bharpy\b|\bharpies\b/.test(p)) t="Harpy";
+      else if(/\barachne\b|\bspider\b/.test(p)) t="Arachne";
+      else if(/\bcatgirl(s)?\b/.test(p)) t="Catgirl";
+      else if(/\bbunnygirl(s)?\b/.test(p)) t="Bunnygirl";
+      else if(/\bghost(s)?\b/.test(p)) t="Ghost";
+      else if(/\bdemon(s)?\b/.test(p)) t="Demon";
+      else if(/\bblob\b|\bamoeba\b/.test(p)) t="Amorphous Blob";
+      else if(/\btentacle(s)?\b/.test(p)) t="Tentacle Creature";
+    }
+
+    type = t || "Creature";
+    out.push({count:count,size:size,color:color,gender:gender,type:type});
+  }
+
+  return out.length?out:null;
+}
+
+/* ENEMIES LOWER THAN HUMAN: base 8 instead of 10 and slightly slower scaling */
+function makeEnemyStatsForLevel(lvl){
+  var s={
+    endu: 8 + lvl*0.9 + randInt(-2,1),
+    dex:  8 + lvl*0.9 + randInt(-2,1),
+    might:8 + lvl*0.9 + randInt(-2,1),
+    will: 8 + lvl*0.9 + randInt(-2,1),
+    cun:  8 + lvl*0.9 + randInt(-2,1),
+    cha:  8 + lvl*0.9 + randInt(-2,1)
+  };
+  // floor
+  for(var k in s){ if(s.hasOwnProperty(k)) s[k]=Math.max(3, Math.round(s[k]*10)/10); }
+  return s;
+}
+
+function enemyFlavorStatsAdjust(typeLower, s){
+  if(typeLower.indexOf("slime")!==-1){ s.endu+=1.5; s.dex-=1; s.will-=1; }
+  if(typeLower.indexOf("incub")!==-1 || typeLower.indexOf("succub")!==-1){ s.cha+=2.5; s.cun+=1.5; s.might-=1; }
+  if(typeLower.indexOf("minotaur")!==-1){ s.might+=3; s.endu+=1.5; s.cun-=2; }
+  if(typeLower.indexOf("lamia")!==-1){ s.dex+=1.5; s.cun+=1; s.might+=1; }
+  if(typeLower.indexOf("harpy")!==-1){ s.dex+=2.5; s.endu-=1; }
+  if(typeLower.indexOf("arachne")!==-1){ s.cun+=2.5; s.dex+=1; }
+  if(typeLower.indexOf("tentacle")!==-1){ s.endu+=2.5; s.might+=1.5; s.dex-=2; }
+}
+
+function enemyComputePoolsFromStats(e){
+  if(!e.stats) e.stats={};
+  recomputeDerivedPoolsNew(e.stats);
+
+  // pool nerf vs humans (easier to kill): reduce maxima modestly
+  e.maxLust = Math.max(20, Math.floor(e.stats.maxLust * 0.88));
+  e.maxStam = Math.max(20, Math.floor(e.stats.maxStam * 0.85));
+  e.maxMana = Math.max(20, Math.floor(e.stats.maxMana * 0.90));
+
+  e.lust=tasClamp(e.lust||0,0,e.maxLust);
+  e.stam=tasClamp((e.stam===undefined?e.maxStam:e.stam),0,e.maxStam);
+
+  if(!e.effects) e.effects={};
+}
+
+function makeEnemyForType(type,playerLvl,variantIndex,explicitName,opts){
+  opts=opts||{};
+  var lvl=Math.max(1,playerLvl+randInt(-1,1));
+
+  var name=explicitName || type;
+  if(!explicitName){
+    if(variantIndex!==undefined&&variantIndex!==null){
+      if(type==="Succubus/Incubus"){
+        name=(Math.random()<0.5?"Succubus":"Incubus")+" "+(variantIndex+1);
+      } else {
+        name=type+" "+(variantIndex+1);
+      }
+    }
+  }
+
+  var prefix=[];
+  if(opts.size==="small") prefix.push("Small");
+  if(opts.size==="large") prefix.push("Large");
+  if(opts.color) prefix.push(toTitleCase(opts.color));
+  if(opts.gender) prefix.push(toTitleCase(opts.gender));
+  if(prefix.length){
+    name = prefix.join(" ")+" "+name;
+  }
+
+  var desc="A hostile seducer that pressures lust and stamina.";
+  var typeLower=(type||"").toLowerCase();
+
+  if(typeLower.indexOf("slime")!==-1){
+    desc="A shifting gel-creature that overwhelms with clingy, slick pressure and smothering contact.";
+    if(opts.color || opts.size){
+      var c = opts.color ? (opts.color+" ") : "";
+      var sz = opts.size==="large"?"large":(opts.size==="small"?"small":"");
+      desc="A "+(sz?(sz+" "):"")+c+"slime that fights with enveloping, sticky pressure and clingy grapples.";
+    }
+  } else if(type==="Succubus/Incubus"){
+    desc="A pheromone-heavy temptress/temptor that attacks with charm and draining contact.";
+  } else if(type==="Minotaur"){
+    desc="A powerful brute that overwhelms with sheer strength and relentless physical pressure.";
+  }
+
+  var st = makeEnemyStatsForLevel(lvl);
+  enemyFlavorStatsAdjust(typeLower, st);
+
+  var e={
+    id:"E"+Date.now()+"_"+randInt(100,999),
+    type:type,
+    name:name,
+    lvl:lvl,
+    lust:0,
+    stam:undefined,
+    desc:desc,
+    stats:{
+      endu:st.endu, dex:st.dex, might:st.might, will:st.will, cun:st.cun, cha:st.cha,
+      lust:0, stam:BASE_RESOURCE, mana:BASE_RESOURCE
+    },
+    effects:{}
+  };
+
+  if(opts.size==="small"){
+    e.stats.endu=Math.max(3, e.stats.endu*0.85);
+    e.stats.might=Math.max(3, e.stats.might*0.85);
+  } else if(opts.size==="large"){
+    e.stats.endu=Math.max(3, e.stats.endu*1.10);
+    e.stats.might=Math.max(3, e.stats.might*1.10);
+  }
+
+  enemyComputePoolsFromStats(e);
+  return e;
+}
+
+function detectAndSpawnEnemiesFromOutput(text, forceOverwrite){
+  tasEnsureStateAndPlayer();
+  var lower=safeLower(text);
+
+  if(textLooksLikeClassMenu(lower)) return false;
+  if(textLooksLikeSkillMenu(lower)) return false;
+
+  if(tasContainsAny(lower, defeatedReferenceCues) && !tasContainsAny(lower, encounterThreatCues)){
+    return false;
+  }
+
+  if(!tasContainsAny(lower, encounterNouns)) return false;
+  if(!tasContainsAny(lower, encounterSceneCues)) return false;
+
+  if(!tasContainsAny(lower, creatureTypeKeywords) && !tasContainsAny(lower, encounterThreatCues)) return false;
+  if(looksLikeEnvironmentOnly(lower)) return false;
+  if(!hasNounNearCreature(lower)) return false;
+
+  if(!forceOverwrite){
+    var anyAlive=false;
+    for(var k=0;k<state.encounter.enemies.length;k++){
+      if(state.encounter.enemies[k] && state.encounter.enemies[k].stam>0) { anyAlive=true; break; }
+    }
+    if(anyAlive) return false;
+  }
+
+  var plr=state.players[state.playerList[0]];
+  var plrLvl=(plr&&plr.stats&&plr.stats.lvl)?plr.stats.lvl:1;
+
+  var count=estimateGroupCount(lower);
+  var type = enemyTypeFromText(lower) || "Creature";
+
+  if(type && wasRecentlyDefeatedName(safeLower(type))) return false;
+
+  state.encounter.enemies=[];
+  for(var i=0;i<count;i++){
+    state.encounter.enemies.push(makeEnemyForType(type,plrLvl,i,null,{}));
+  }
+
+  state.targeting.targetId = state.encounter.enemies[0] ? state.encounter.enemies[0].id : null;
+  state.targeting.targetLabel = state.encounter.enemies[0] ? state.encounter.enemies[0].name : "";
+
+  state.combat.status="IN_COMBAT";
+  state.combat.lastResolution="";
+  state.combat.hadEnemies=true;
+  return true;
+}
+
+function manualClearAndSetEncounter(enemiesArray){
+  state.encounter.enemies = enemiesArray || [];
+  if(state.encounter.enemies.length){
+    state.combat.status="IN_COMBAT";
+    state.combat.hadEnemies=true;
+    state.combat.lastResolution="";
+    state.targeting.targetId = state.encounter.enemies[0].id;
+    state.targeting.targetLabel = state.encounter.enemies[0].name;
+  } else {
+    state.combat.status="OUT_OF_COMBAT";
+    state.combat.hadEnemies=false;
+    state.targeting.targetId=null;
+    state.targeting.targetLabel="";
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   EFFECTS (BUFF/DEBUFF stacks) – EXPANDED
+--------------------------------------------------------------------------- */
+
+function addStacks(map, name, stacks){
+  if(!map) return;
+  if(!name || stacks<=0) return;
+  map[name]=Math.max(0,(map[name]||0)+stacks);
+}
+
+function hitPenaltyFromEffects(effects){
+  var r = effects["Restrained"]||0;
+  return tasClamp(r*0.03, 0, 0.30);
+}
+
+function hitBonusFromEffects(effects){
+  var f = effects["Focused"]||0;
+  return tasClamp(f*0.03, 0, 0.25);
+}
+
+function avoidPenaltyFromEffects(effects){
+  var s = effects["Slippery"]||0;
+  return tasClamp(s*0.03, 0, 0.30);
+}
+
+function avoidBonusFromEffects(effects){
+  var e = effects["Evasion"]||0;
+  return tasClamp(e*0.03, 0, 0.25);
+}
+
+function lustTakenMultiplierFromEffects(effects){
+  var o = effects["Overstimulated"]||0;
+  var v = effects["Vulnerable"]||0;
+  var g = effects["Guarded"]||0;
+
+  var up = tasClamp((o+v)*0.05, 0, 0.70);
+  var down = tasClamp(g*0.05, 0, 0.50);
+
+  return tasClamp(1 + up - down, 0.50, 2.00);
+}
+
+function damageMultiplierFromEffects(effects){
+  var w = effects["Weakened"]||0;
+  var e = effects["Empowered"]||0;
+
+  var down = tasClamp(w*0.05, 0, 0.50);
+  var up = tasClamp(e*0.05, 0, 0.50);
+
+  return tasClamp(1 + up - down, 0.50, 1.80);
+}
+
+function tickMapStacks(map){
+  var newMap={};
+  for(var k in map){
+    if(map.hasOwnProperty(k) && map[k]>0){
+      var v = map[k]-1;
+      if(v>0) newMap[k]=v;
+    }
+  }
+  return newMap;
+}
+
+function tickEffectsOnEntity(entity, isPlayer){
+  var effects = isPlayer ? (entity.debuffs||{}) : (entity.effects||{});
+  var msg="";
+
+  // DOT: Aphrodisiac -> adds lust
+  if(effects["Aphrodisiac"] && effects["Aphrodisiac"]>0){
+    var d = effects["Aphrodisiac"];
+    if(isPlayer) msg += playerApplyLust(entity.stats, d, d);
+    else msg += enemyApplyLust(entity, d, d);
+  }
+
+  // DOT: Drained -> stamina loss
+  if(effects["Drained"] && effects["Drained"]>0){
+    var dr = effects["Drained"];
+    if(isPlayer){
+      entity.stats.stam = tasClamp(entity.stats.stam - dr, 0, entity.stats.maxStam);
+      msg += "\n<< Drained x"+dr+": you lose "+dr+" stamina. >>";
+    } else {
+      entity.stam = tasClamp(entity.stam - dr, 0, entity.maxStam);
+      msg += "\n<< Drained x"+dr+": "+entity.name+" loses "+dr+" stamina. >>";
+    }
+  }
+
+  if(isPlayer) entity.debuffs = tickMapStacks(effects);
+  else entity.effects = tickMapStacks(effects);
+
+  return msg;
+}
+
+/* ---------------------------------------------------------------------------
+   LUST (fills) + CLIMAX
+--------------------------------------------------------------------------- */
+
+function enemyApplyLust(enemy, amount, hitSizeForClimax){
+  var msg="";
+  var mult = lustTakenMultiplierFromEffects(enemy.effects||{});
+  amount = Math.max(0, Math.round(amount * mult));
+
+  enemy.lust = tasClamp(enemy.lust + amount, 0, enemy.maxLust);
+
+  if(enemy.lust>=enemy.maxLust){
+    var loss = staminaLossOnClimax(enemy.maxStam, hitSizeForClimax);
+    enemy.stam = tasClamp(enemy.stam - loss, 0, enemy.maxStam);
+
+    msg+="\n<< "+enemy.name+" climaxes hard, losing "+loss+" stamina. >>";
+
+    if(enemy.stam<=0){
+      msg+="\n<< "+enemy.name+" is completely exhausted and can’t continue (DEFEATED). >>";
+      enemy.lust=enemy.maxLust;
+      return msg;
+    }
+
+    enemy.lust = lustRemainAfterClimax(enemy.maxLust, enemy.stam, enemy.maxStam);
+    msg+="\n<< "+enemy.name+" recovers a little, lust dropping only partially. (Enemy Lust: "+tasToFixed(enemy.lust,1)+"/"+tasToFixed(enemy.maxLust,1)+") >>";
+    return msg;
+  }
+
+  var ratio=(enemy.maxLust>0)?(enemy.lust/enemy.maxLust):0;
+  if(ratio>=0.80){
+    msg+="\n<< "+enemy.name+" gains "+tasToFixed(amount,1)+" lust pressure and is NEAR CLIMAX (not defeated). (Enemy Lust: "+tasToFixed(enemy.lust,1)+"/"+tasToFixed(enemy.maxLust,1)+") >>";
+  } else {
+    msg+="\n<< "+enemy.name+" gains "+tasToFixed(amount,1)+" lust pressure. (Enemy Lust: "+tasToFixed(enemy.lust,1)+"/"+tasToFixed(enemy.maxLust,1)+") >>";
+  }
+  return msg;
+}
+
+function playerApplyLust(stats, amount, hitSizeForClimax){
+  var msg="";
+  stats.lust = tasClamp(stats.lust + amount, 0, stats.maxLust);
+
+  if(stats.lust>=stats.maxLust){
+    var loss = staminaLossOnClimax(stats.maxStam, hitSizeForClimax);
+    stats.stam = tasClamp(stats.stam - loss, 0, stats.maxStam);
+    stats.orgasms = (stats.orgasms||0) + 1;
+
+    msg+="\n<< Your lust spikes past your limit and you climax, losing "+loss+" stamina. >>";
+
+    if(stats.stam<=0){
+      msg+="\n<< You are completely exhausted; you can’t continue. >>";
+      stats.lust=stats.maxLust;
+      return msg;
+    }
+
+    stats.lust = lustRemainAfterClimax(stats.maxLust, stats.stam, stats.maxStam);
+    msg+="\n<< Your lust drops only partially after climax. (Lust: "+tasToFixed(stats.lust,1)+"/"+tasToFixed(stats.maxLust,1)+") >>";
+    return msg;
+  }
+
+  msg+="\n<< You gain "+tasToFixed(amount,1)+" lust (Lust: "+tasToFixed(stats.lust,1)+"/"+tasToFixed(stats.maxLust,1)+"). >>";
+  return msg;
+}
+
+/* ---------------------------------------------------------------------------
+   EXP
+--------------------------------------------------------------------------- */
+
+function classExpThreshold(classLvl){ return 50+(classLvl-1)*25; }
+
+function grantClassExp(stats, amount){
+  stats.classExp = (stats.classExp||0) + amount;
+  var msg="\n<< Class Exp +"+amount+" >>";
+  while(stats.classExp >= classExpThreshold(stats.classLvl||1)){
+    stats.classExp -= classExpThreshold(stats.classLvl||1);
+    stats.classLvl = (stats.classLvl||1) + 1;
+    msg+="\n<< Your class mastery deepens. Class LVL is now "+stats.classLvl+". >>";
+  }
+  return msg;
+}
+
+function playerExpThreshold(lvl){ return 100 + (lvl-1)*50; }
+
+function grantPlayerExp(stats, amount){
+  stats.exp = (stats.exp||0) + amount;
+  var msg="\n<< Exp +"+amount+" >>";
+  while(stats.exp >= playerExpThreshold(stats.lvl||1)){
+    stats.exp -= playerExpThreshold(stats.lvl||1);
+    stats.lvl = (stats.lvl||1) + 1;
+    stats.statPoints = (stats.statPoints||0) + 4;
+    msg+="\n<< You level up! LVL is now "+stats.lvl+". Stat Points +4 (Unspent: "+stats.statPoints+"). >>";
+  }
+  return msg;
+}
+
+function resolveEnemyDefeatsAndXp(plr){
+  var enc=state.encounter;
+  var msg="";
+  for(var j=enc.enemies.length-1;j>=0;j--){
+    if(enc.enemies[j] && enc.enemies[j].stam<=0){
+      markRecentlyDefeated(enc.enemies[j].name);
+      msg += grantClassExp(plr.stats, 10 + enc.enemies[j].lvl*3);
+      msg += grantPlayerExp(plr.stats, 12 + enc.enemies[j].lvl*4);
+      enc.enemies.splice(j,1);
+    }
+  }
+  return msg;
+}
+
+/* ---------------------------------------------------------------------------
+   HIT + DAMAGE
+--------------------------------------------------------------------------- */
+
+function computeHitChance(attType, attStats, defStats, attEffects, defEffects){
+  var base=0.75;
+
+  var att=10, def=10;
+  if(attType==="Physical" || attType==="Hybrid"){
+    att = (attStats.dex||0);
+    def = (defStats.dex||0);
+  } else {
+    att = (attStats.cun||0);
+    def = (defStats.cun||0);
+  }
+
+  var diff = (att - def);
+  var chance = base + diff*0.02;
+
+  chance -= hitPenaltyFromEffects(attEffects||{});
+  chance += hitBonusFromEffects(attEffects||{});
+
+  chance += avoidPenaltyFromEffects(defEffects||{});
+  chance -= avoidBonusFromEffects(defEffects||{});
+
+  return tasClamp(chance, 0.10, 0.95);
+}
+
+function computeDamageRange(tag, tier, skillLvl, attStats, attEffects){
+  var combatType = skillTypeForCombat(tag);
+
+  var base=10;
+  if(combatType==="Physical") base=11;
+  if(combatType==="Magical") base=10;
+  if(combatType==="Hybrid") base=10;
+
+  if(tier==="T2") base+=4;
+  if(tier==="T3") base+=8;
+
+  var dStat=10;
+  if(combatType==="Physical") dStat=(attStats.might||0);
+  else dStat=(attStats.cha||0);
+
+  var mid = base + (dStat*0.9) + (skillLvl||1)*1.2;
+  var spread = 5 + Math.floor((skillLvl||1)/2);
+
+  var minD = tasClamp(Math.floor(mid - spread), 4, 80);
+  var maxD = tasClamp(Math.floor(mid + spread), minD+1, 120);
+
+  var mult = damageMultiplierFromEffects(attEffects||{});
+  minD = Math.max(1, Math.floor(minD*mult));
+  maxD = Math.max(minD+1, Math.floor(maxD*mult));
+
+  return {min:minD, max:maxD};
+}
+
+function rollDamage(range){ return randInt(range.min, range.max); }
+
+/* ---------------------------------------------------------------------------
+   COSTS
+--------------------------------------------------------------------------- */
+
+function playerInputAllowsSkillUse(lower){
+  if(lower.indexOf("/useskill")!==-1) return true;
+  if(tasContainsAny(lower, selectionVerbs)) return false;
+  return tasContainsAny(lower, playerActionVerbs);
+}
+
+function applyPlayerPaidCosts(plr, costStam, costMana){
+  if(plr.stats.stam < costStam) return {ok:false,msg:"\n<< Not enough Stamina (need "+costStam+"). >>"};
+  if(plr.stats.mana < costMana) return {ok:false,msg:"\n<< Not enough Mana (need "+costMana+"). >>"};
+
+  if(costStam) plr.stats.stam = tasClamp(plr.stats.stam - costStam, 0, plr.stats.maxStam);
+  if(costMana) plr.stats.mana = tasClamp(plr.stats.mana - costMana, 0, plr.stats.maxMana);
+  return {ok:true,msg:"\n<< Cost paid: -"+costStam+" Stamina, -"+costMana+" Mana. >>"};
+}
+
+/* ---------------------------------------------------------------------------
+   BASE ATTACKS (skill-less)
+--------------------------------------------------------------------------- */
+
+function tryBaseAttack(plr, lower, rawText){
+  if(tasContainsAny(lower, selectionVerbs)) return "";
+  if(!tasContainsAny(lower, baseAttackTriggers)) return "";
+
+  var msg="";
+
+  var t = detectTargetFromText(rawText);
+  if(t){
+    if(t.type==="index"){
+      if(setTargetIndexIfValid(t.index)) msg += "\n<< Target: "+state.targeting.targetLabel+" >>";
+    } else if(t.type==="descriptor"){
+      if(setTargetByBestDescriptorMatch(t.lower)) msg += "\n<< Target: "+state.targeting.targetLabel+" >>";
+    }
+  } else {
+    // still allow descriptor-only targeting without a formal match object
+    if(setTargetByBestDescriptorMatch(lower)) msg += "\n<< Target: "+state.targeting.targetLabel+" >>";
+  }
+
+  var paid = applyPlayerPaidCosts(plr, 2, 0);
+  msg += paid.msg;
+  if(!paid.ok) return msg;
+
+  state.lastTurn.playerActed=true;
+
+  var enemy=getTargetEnemyOrFirstAlive();
+  if(!enemy){
+    msg += "\n<< No active enemies to affect. >>";
+    return msg;
+  }
+
+  var chance = computeHitChance("Physical", plr.stats, enemy.stats, plr.debuffs||{}, enemy.effects||{});
+  if(Math.random() > chance){
+    msg += "\n<< You miss your opening (Physical hit chance "+Math.round(chance*100)+"%). >>";
+    return msg;
+  }
+
+  var range = computeDamageRange("Physical","T1",1,plr.stats, plr.buffs||{});
+  var dmg = rollDamage(range);
+
+  msg += enemyApplyLust(enemy, dmg, dmg);
+  msg += resolveEnemyDefeatsAndXp(plr);
+
+  state.combat.status="IN_COMBAT";
+  return msg;
+}
+
+/* ---------------------------------------------------------------------------
+   SKILL USE (Player input only)
+--------------------------------------------------------------------------- */
+
+function applyAdvancedEffectOnHit(effectName, target, stacks, isPlayerTarget){
+  if(!effectName || stacks<=0) return "";
+
+  // Decide if it’s buff or debuff by name
+  var isBuff = (effectName==="Focused"||effectName==="Evasion"||effectName==="Guarded"||effectName==="Empowered");
+
+  if(isPlayerTarget){
+    if(isBuff) addStacks(target.buffs, effectName, stacks);
+    else addStacks(target.debuffs, effectName, stacks);
+    return "\n<< "+(isBuff?"Buff":"Debuff")+" applied: "+effectName+" x"+stacks+" >>";
+  } else {
+    // For enemies: treat everything as effects (debuff-like)
+    addStacks(target.effects, effectName, stacks);
+    return "\n<< Effect applied to "+target.name+": "+effectName+" x"+stacks+" >>";
+  }
+}
+
+
+function skillAdvancedMilestone(levelInt){ return (levelInt>0 && levelInt%5===0); }
+
+function chooseMilestoneAdvancedEffect(skillNameLower, tag){
+  // Deterministic choice based on name hash
+  var h=0;
+  for(var i=0;i<skillNameLower.length;i++) h=(h*31 + skillNameLower.charCodeAt(i))>>>0;
+
+  // include some buffs (per your Option 2) and common debuffs
+  var debuffs=["Aphrodisiac","Restrained","Slippery","Overstimulated","Weakened","Vulnerable","Drained"];
+  var buffs=["Focused","Evasion","Guarded","Empowered"];
+
+  if(tag==="Physical"){
+    return (h%5===0) ? ("Advanced: extra shot.") : ("Advanced: applies "+debuffs[h%debuffs.length]+" stacks on hit.");
+  }
+  if(tag==="Magical"){
+    return (h%4===0) ? ("Advanced: applies "+buffs[h%buffs.length]+" to self on cast.") : ("Advanced: applies "+debuffs[h%debuffs.length]+" stacks on hit.");
+  }
+  if(tag==="Hybrid"){
+    return (h%3===0) ? ("Advanced: extra shot.") : ("Advanced: applies "+debuffs[h%debuffs.length]+" stacks on hit.");
+  }
+  // General/AoE/Debuff
+  return ("Advanced: applies "+debuffs[h%debuffs.length]+" stacks on hit.");
+}
+
+function ensureSkillMilestoneEffect(plr, idx, levelInt){
+  if(!plr || !plr.skills || idx<0) return "";
+  if(!skillAdvancedMilestone(levelInt)) return "";
+  var nm=(plr.skills.name[idx]||"");
+  var tag=(plr.skills.tag[idx]||"General");
+  var effect=(plr.skills.effect[idx]||"");
+  var lowerEffect=effect.toLowerCase();
+  // prevent duplicates for same milestone
+  if(lowerEffect.indexOf("[milestone "+levelInt+"]")!==-1) return "";
+
+  var add = chooseMilestoneAdvancedEffect(nm.toLowerCase(), tag);
+  plr.skills.effect[idx] = (effect?effect+" ":"") + "[Milestone "+levelInt+"]: "+add;
+  // Also queue for context once, so the model sees the updated description
+  queueSkillContextInject(cleanSkillName(nm), plr.skills.effect[idx]);
+  return "\n<< "+cleanSkillName(nm)+" reaches LVL "+levelInt+" and evolves. >>";
+}
+
+function skillExtraShots(skillLvl, effectLower){
+  var lvlInt=Math.floor(skillLvl||1);
+  if(lvlInt<5) return 1;
+  if(effectLower.indexOf("extra shot")===-1 && effectLower.indexOf("multi-shot")===-1 && effectLower.indexOf("additional shot")===-1) return 1;
+  // +1 shot at 5, +2 at 10, +3 at 15...
+  return 1 + Math.floor(lvlInt/5);
+}
+function advancedEffectStacksFromSkillLvl(skillLvl, tier){
+  var s=1;
+  if(skillLvl>=2.5) s=2;
+  if(skillLvl>=4.5) s=3;
+  if(tier==="T2") s+=1;
+  if(tier==="T3") s+=2;
+  return tasClamp(s,1,6);
+}
+
+function trySkillUse_PlayerOnly(text){
+  if(!text||typeof text!=="string") return text;
+  tasEnsureStateAndPlayer();
+  var plr=state.players[state.playerList[0]];
+  if(!plr||!plr.stats||!plr.skills) return text;
+
+  var lower=safeLower(text);
+  var feedback="";
+
+  state.lastTurn.playerActed=false;
+
+  var t = detectTargetFromText(text);
+  if(t){
+    if(t.type==="index"){
+      if(setTargetIndexIfValid(t.index)) feedback += "\n<< Target: "+state.targeting.targetLabel+" >>";
+    } else if(t.type==="descriptor"){
+      if(setTargetByBestDescriptorMatch(t.lower)) feedback += "\n<< Target: "+state.targeting.targetLabel+" >>";
+    }
+  } else {
+    // fallback descriptor-only targeting even if detectTargetFromText didn't return
+    if(setTargetByBestDescriptorMatch(lower)) feedback += "\n<< Target: "+state.targeting.targetLabel+" >>";
+  }
+
+  var baseMsg = tryBaseAttack(plr, lower, text);
+  if(baseMsg){
+    feedback += baseMsg;
+    if(feedback) text += feedback;
+    return text;
+  }
+
+  var allowUse = playerInputAllowsSkillUse(lower);
+
+  var forcedName=null;
+  var mForced=text.match(/\/useskill\s+([^\n\r]+)/i);
+  if(mForced&&mForced[1]) forcedName=cleanSkillName(mForced[1]);
+
+  if(!allowUse && !forcedName) return text;
+
+  for(var i=0;i<plr.skills.name.length;i++){
+    var nm=plr.skills.name[i];
+    var key=(nm||"").toLowerCase();
+
+    var matched=false;
+    if(forcedName && nm.toLowerCase()===forcedName.toLowerCase()) matched=true;
+    else if(allowUse){
+      var re=new RegExp("\\b"+escRe(key)+"\\b");
+      if(re.test(lower)) matched=true;
+    }
+    if(!matched) continue;
+
+    var tag=plr.skills.tag[i]||"General";
+    var tier=plr.skills.tier[i]||"T1";
+    var skillLvl=(plr.skills.lvl[i]||1);
+
+    var cs=plr.skills.costStam[i]||0;
+    var cm=plr.skills.costMana[i]||0;
+
+    var adv = inferAdvancedEffect(key, plr.skills.effect[i]||"");
+    if(adv && skillLvl < 2.5){
+      if(skillTypeForCombat(tag)==="Physical" || skillTypeForCombat(tag)==="Hybrid") cs += 1;
+      else cm += 2;
+      feedback += "\n<< Low-level drawback: advanced effect strains you (extra cost). >>";
+    }
+
+    var paid = applyPlayerPaidCosts(plr, cs, cm);
+    feedback += paid.msg;
+    if(!paid.ok) break;
+
+    state.lastTurn.playerActed=true;
+    state.combat.status="IN_COMBAT";
+
+    plr.skills.uses[i]=(plr.skills.uses[i]||0)+1;
+    var prevInt=Math.floor(skillLvl||1);
+    plr.skills.lvl[i]=(skillLvl||1) + 0.08;
+    skillLvl=plr.skills.lvl[i];
+    var newInt=Math.floor(skillLvl||1);
+    if(newInt>prevInt){ feedback += "\n<< " + cleanSkillName(nm) + " LVL up ("+prevInt+"→"+newInt+"). >>"; }
+    feedback += ensureSkillMilestoneEffect(plr, i, newInt);
+
+    if(state.encounter.enemies.length===0){
+      feedback += "\n<< No active enemies to affect. >>";
+      break;
+    }
+
+    var combatType = skillTypeForCombat(tag);
+
+    if(tag==="AoE"){
+      var anyHit=false;
+      for(var ei=0;ei<state.encounter.enemies.length;ei++){
+        var e=state.encounter.enemies[ei];
+        if(e && e.stam>0){
+          anyHit=true;
+
+          var chance = computeHitChance("Magical", plr.stats, e.stats, plr.debuffs||{}, e.effects||{});
+          if(Math.random() > chance){
+            feedback += "\n<< "+e.name+" avoids the worst of it. >>";
+            continue;
+          }
+
+          var perRange = computeDamageRange("Magical", tier, skillLvl, plr.stats, plr.buffs||{});
+          perRange.min=Math.floor(perRange.min*PLAYER_AOE_DAMAGE_SCALE);
+          perRange.max=Math.floor(perRange.max*PLAYER_AOE_DAMAGE_SCALE);
+          var per=rollDamage(perRange);
+
+          feedback += enemyApplyLust(e, per, per);
+
+          if(adv){
+            var stacks=advancedEffectStacksFromSkillLvl(skillLvl, tier);
+            feedback += applyAdvancedEffectOnHit(adv, e, stacks, false);
+          }
+        }
+      }
+      if(!anyHit) feedback += "\n<< No active enemies to affect. >>";
+    } else {
+      var effectLower=(plr.skills.effect[i]||"").toLowerCase();
+      var shots = skillExtraShots(skillLvl, effectLower);
+
+      var baseTarget=getTargetEnemyOrFirstAlive();
+      if(!baseTarget){ feedback += "\n<< No active enemies to affect. >>"; break; }
+
+      var anyHit2=false;
+
+      for(var sh=0; sh<shots; sh++){
+        var enemy=baseTarget;
+
+        // If multiple enemies are alive, later shots drift to the next alive target
+        if(sh>0 && state.encounter.enemies.length>1){
+          enemy=getNthAliveEnemyAfter(enemy, sh);
+          if(!enemy) enemy=baseTarget;
+        }
+
+        var chance2 = computeHitChance(combatType, plr.stats, enemy.stats, plr.debuffs||{}, enemy.effects||{});
+        if(Math.random() > chance2){
+          feedback += "\n<< Your technique fails to connect (Hit chance "+Math.round(chance2*100)+"%). >>";
+          continue;
+        }
+
+        anyHit2=true;
+
+        var range = computeDamageRange(tag, tier, skillLvl, plr.stats, plr.buffs||{});
+        var dmg=rollDamage(range);
+        feedback += enemyApplyLust(enemy, dmg, dmg);
+
+        if(adv){
+          var stacks2=advancedEffectStacksFromSkillLvl(skillLvl, tier);
+          feedback += applyAdvancedEffectOnHit(adv, enemy, stacks2, false);
+        }
+      }
+
+      if(!anyHit2) break;
+    }
+
+    feedback += resolveEnemyDefeatsAndXp(plr);
+    break;
+  }
+
+  if(feedback) text+=feedback;
+  return text;
+}
+
+/* ---------------------------------------------------------------------------
+   PLAYER LUST FROM OUTPUT (conservative)
+--------------------------------------------------------------------------- */
+
+function textLooksLikePreClass(lower){
+  if(textLooksLikeClassMenu(lower)) return true;
+  if(lower.indexOf("please select a class")!==-1) return true;
+  return false;
+}
+
+function detectPlayerHurtFromOutput(text){
+  tasEnsureStateAndPlayer();
+  var plr=state.players[state.playerList[0]];
+  if(!plr||!plr.stats) return {text:text,enemyActed:false};
+
+  var lower=safeLower(text);
+
+  if(plr.class_==="N/A" && textLooksLikePreClass(lower)){
+    return {text:text,enemyActed:false};
+  }
+
+  if(state.combat.status!=="IN_COMBAT" && state.encounter.enemies.length===0){
+    return {text:text,enemyActed:false};
+  }
+
+  var hasTarget=(lower.indexOf(" you ")!==-1)||lower.startsWith("you ")||(lower.indexOf(" your ")!==-1);
+  if(!hasTarget) return {text:text,enemyActed:false};
+
+  if(!tasContainsAny(lower,combatContextWords) && !tasContainsAny(lower, encounterNouns)) return {text:text,enemyActed:false};
+
+  var hasLust=tasContainsAny(lower,attackWords) || tasContainsAny(lower,lightLustWords) ||
+              tasContainsAny(lower,mediumLustWords) || tasContainsAny(lower,strongLustWords) ||
+              tasContainsAny(lower,climaxWords);
+  if(!hasLust) return {text:text,enemyActed:false};
+
+  var base = tasContainsAny(lower,climaxWords)?22:
+             tasContainsAny(lower,strongLustWords)?14:
+             tasContainsAny(lower,mediumLustWords)?9:
+             tasContainsAny(lower,lightLustWords)?6:8;
+
+  // Apply Guarded etc via player debuffs/buffs? lustTakenMultiplier uses enemy.effects, so mirror on player:
+  var mult = lustTakenMultiplierFromEffects(plr.debuffs||{});
+  base = Math.max(1, Math.round(base*mult));
+
+  return {text:text+playerApplyLust(plr.stats,base,base),enemyActed:true};
+}
+
+/* ---------------------------------------------------------------------------
+   ENEMY AUTO TURN
+--------------------------------------------------------------------------- */
+
+function enemyAutoTurnIfNeeded(){
+  tasEnsureStateAndPlayer();
+  var plr=state.players[state.playerList[0]];
+  if(!plr||!plr.stats) return "";
+
+  if(!state.lastTurn.playerActed) return "";
+  if(state.lastTurn.enemyActedInOutput) return "";
+
+  var enc=state.encounter;
+  if(!enc.enemies.length) return "";
+
+  var alive=[];
+  for(var i=0;i<enc.enemies.length;i++){
+    if(enc.enemies[i] && enc.enemies[i].stam>0) alive.push(enc.enemies[i]);
+  }
+  if(!alive.length) return "";
+
+  var n=alive.length;
+  var actCount=tasClamp(Math.min(n,1+Math.floor(n/2)),1,3);
+
+  var total=0;
+  var msg="\n<< Enemy Turn ("+actCount+" attacker(s)): >>";
+
+  for(var a=0;a<actCount;a++){
+    var e=alive[a % alive.length];
+
+    var t=(e.type||"").toLowerCase();
+    var kind = (t.indexOf("succub")!==-1 || t.indexOf("incub")!==-1) ? "Magical" : "Physical";
+
+    var chance = computeHitChance(kind, e.stats, plr.stats, e.effects||{}, (plr.buffs||{}));
+    if(Math.random() > chance){
+      msg+="\n<< "+e.name+" misses an opening. >>";
+      continue;
+    }
+
+    var raw=tasClamp(6+e.lvl+randInt(-1,5),ENEMY_TURN_PER_ENEMY_MIN,ENEMY_TURN_PER_ENEMY_MAX);
+    if(n>1) raw=Math.floor(raw*ENEMY_TURN_MULTI_SCALE);
+
+    var rem=ENEMY_TURN_MAX_TOTAL_LUST-total;
+    if(rem<=0) break;
+    var dmg=tasClamp(raw,1,rem);
+    total+=dmg;
+
+    msg+="\n<< "+e.name+" presses the advantage with a teasing counter. >>";
+    msg+=playerApplyLust(plr.stats,dmg,dmg);
+  }
+  return msg;
+}
+
+/* ---------------------------------------------------------------------------
+   REGEN
+--------------------------------------------------------------------------- */
+
+function playerNaturalRegen_LustFalls(mult, inCombat){
+  tasEnsureStateAndPlayer();
+  state.playerList.forEach(function(plrName){
+    var plr=state.players[plrName];
+    if(!plr||!plr.stats) return;
+    var s=plr.stats;
+    if(s.stam<=0) return;
+
+    recomputeDerivedPoolsNew(s);
+
+    var base = s.lustRegen||0;
+    var amt = inCombat ? Math.max(0, Math.floor(base/10)) : base;
+    amt = Math.floor(amt * (mult||1));
+
+    if(amt>0) s.lust=tasClamp(s.lust - amt, 0, s.maxLust);
+  });
+}
+
+function playerNaturalRegen_StamMana(mult, inCombat){
+  tasEnsureStateAndPlayer();
+  state.playerList.forEach(function(plrName){
+    var plr=state.players[plrName];
+    if(!plr||!plr.stats) return;
+    var s=plr.stats;
+    if(s.stam<=0) return;
+
+    recomputeDerivedPoolsNew(s);
+
+    var sr = s.stamRegen||0;
+    var mr = s.manaRegen||0;
+
+    var stamAmt = inCombat ? Math.max(0, Math.floor(sr/10)) : sr;
+    var manaAmt = inCombat ? Math.max(0, Math.floor(mr/10)) : mr;
+
+    stamAmt = Math.floor(stamAmt*(mult||1));
+    manaAmt = Math.floor(manaAmt*(mult||1));
+
+    if(stamAmt>0) s.stam=tasClamp(s.stam+stamAmt,0,s.maxStam);
+    if(manaAmt>0) s.mana=tasClamp(s.mana+manaAmt,0,s.maxMana);
+  });
+}
+
+
+/* ---------------------------------------------------------------------------
+   COMBAT RESOLUTION
+--------------------------------------------------------------------------- */
+
+function updateDeadPlrs(){
+  tasEnsureStateAndPlayer();
+  state.deadPlrs=[];
+  state.playerList.forEach(function(plrName){
+    var plr=state.players[plrName];
+    if(!plr||!plr.stats) return;
+    if(plr.stats.stam<=0) state.deadPlrs.push(plrName);
+  });
+}
+
+function allPlayersDefeated(){
+  tasEnsureStateAndPlayer();
+  if(!state.playerList.length) return false;
+  for(var i=0;i<state.playerList.length;i++){
+    var p=state.players[state.playerList[i]];
+    if(p && p.stats && p.stats.stam>0) return false;
+  }
+  return true;
+}
+
+function anyEnemiesAlive(){
+  var enc=state.encounter;
+  for(var i=0;i<enc.enemies.length;i++){
+    if(enc.enemies[i] && enc.enemies[i].stam>0) return true;
+  }
+  return false;
+}
+
+function injectCombatResolutionIfNeeded(text){
+  if(!state.combat.hadEnemies) return text;
+
+  var playersDown = allPlayersDefeated();
+  var enemiesAlive = anyEnemiesAlive();
+
+  if(playersDown){
+    state.combat.status="OUT_OF_COMBAT";
+    state.combat.lastResolution="All players are exhausted. Combat ends; transition to aftermath.";
+    state.combat.hadEnemies=false;
+    state.encounter.enemies=[];
+    state.targeting.targetId=null; state.targeting.targetLabel="";
+    return text +
+      "\n\n[COMBAT RESOLUTION]\n"+
+      "All players are exhausted (defeated by stamina loss). Combat is over.\n"+
+      "AI INSTRUCTION: Stop turn-based combat. Write the aftermath and next story beats.\n";
+  }
+
+  if(state.combat.status==="IN_COMBAT" && !enemiesAlive){
+    state.combat.status="OUT_OF_COMBAT";
+    state.combat.lastResolution="All enemies are exhausted. Combat ends; transition forward.";
+    state.combat.hadEnemies=false;
+    state.encounter.enemies=[];
+    state.targeting.targetId=null; state.targeting.targetLabel="";
+    return text +
+      "\n\n[COMBAT RESOLUTION]\n"+
+      "All enemies are exhausted (defeated by stamina loss). Combat is over.\n"+
+      "AI INSTRUCTION: Stop turn-based combat. Continue the story (loot/dialogue/exploration/next encounter).\n";
+  }
+
+  return text;
+}
+
+/* ---------------------------------------------------------------------------
+   MANUAL COMMANDS
+--------------------------------------------------------------------------- */
+
+function handleManualCommands(text){
+  tasEnsureStateAndPlayer();
+  var plr=state.players[state.playerList[0]];
+  if(!plr) return text;
+
+  var feedback="";
+
+  text=text.replace(/\/addskill\s+([^\n|]+?)(?:\s*\|\s*([^\n]+))?(?=$|\n)/gi,
+    function(_m,name,descRaw){
+      var res=ensureSkillFactory(plr,name);
+      if(res.idx>=0 && descRaw&&descRaw.trim()){
+        plr.skills.effect[res.idx]=descRaw.trim();
+        queueSkillContextInject(cleanSkillName(name), descRaw.trim());
+      }
+      feedback+="\n<< Skill added/updated: "+cleanSkillName(name)+" >>";
+      return "";
+    }
+  );
+
+  text=text.replace(/\/clearenemies\b/gi,function(){
+    manualClearAndSetEncounter([]);
+    state.combat.lastResolution="Encounter cleared manually.";
+    feedback+="\n<< Encounter cleared. >>";
+    return "";
+  });
+
+  text=text.replace(/\/target\s+([^\s]+)\b/gi,function(_m,n){
+    var idx=parseOrdinalOrNumberToken(n);
+    if(idx && idx>0 && setTargetIndexIfValid(idx)){
+      feedback+="\n<< Target set: "+state.targeting.targetLabel+" >>";
+    } else {
+      // also allow /target "blue slime" (descriptor)
+      var rest=(n||"").toLowerCase();
+      if(setTargetByBestDescriptorMatch(rest)){
+        feedback+="\n<< Target set: "+state.targeting.targetLabel+" >>";
+      } else {
+        feedback+="\n<< Target invalid. >>";
+      }
+    }
+    return "";
+  });
+
+  text=text.replace(/\/addenemy\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
+    var parts=parseEncounterParts(arg||"");
+    if(!parts){
+      feedback+="\n<< Add enemy parse failed. Example: /addenemy x2 small blue slime girls >>";
+      return "";
+    }
+
+    var plrLvl=(plr&&plr.stats&&plr.stats.lvl)?plr.stats.lvl:1;
+
+    for(var pi=0;pi<parts.length;pi++){
+      var d=parts[pi];
+      for(var c=0;c<d.count;c++){
+        state.encounter.enemies.push(makeEnemyForType(d.type,plrLvl,state.encounter.enemies.length,null,d));
+      }
+    }
+
+    state.combat.status="IN_COMBAT";
+    state.combat.hadEnemies=true;
+
+    if(!state.targeting.targetId){
+      var first=getTargetEnemyOrFirstAlive();
+      if(first){ state.targeting.targetId=first.id; state.targeting.targetLabel=first.name; }
+    }
+
+    feedback+="\n<< Added enemies. Total now: "+state.encounter.enemies.length+" >>";
+    return "";
+  });
+
+  text=text.replace(/\/scanencounter\b/gi,function(){
+    state.flags.forceEncounterScan=true;
+    feedback+="\n<< Encounter scan armed: the next AI output will be scanned for enemies. >>";
+    return "";
+  });
+
+  text=text.replace(/\/setencounter\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
+    var parts=parseEncounterParts(arg||"");
+    if(!parts){
+      feedback+="\n<< Encounter parse failed. Example: /setencounter 2 small blue slime girls (female), 1 large pink slime (futanari) >>";
+      return "";
+    }
+
+    var plrLvl=(plr&&plr.stats&&plr.stats.lvl)?plr.stats.lvl:1;
+    var enemies=[];
+    var idx=0;
+
+    for(var pi=0;pi<parts.length;pi++){
+      var d=parts[pi];
+      for(var c=0;c<d.count;c++){
+        enemies.push(makeEnemyForType(d.type,plrLvl,idx,null,d));
+        idx++;
+      }
+    }
+
+    manualClearAndSetEncounter(enemies);
+    feedback+="\n<< Encounter set: "+enemies.length+" enemies. >>";
+    return "";
+  });
+
+  text=text.replace(/\/setmixed\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
+    var parts=parseEncounterParts(arg||"");
+    if(!parts){
+      feedback+="\n<< Mixed encounter parse failed. Example: /setmixed two small blue slimes, one large pink slime >>";
+      return "";
+    }
+
+    var plrLvl=(plr&&plr.stats&&plr.stats.lvl)?plr.stats.lvl:1;
+    var enemies=[];
+    var idx=0;
+
+    for(var pi=0;pi<parts.length;pi++){
+      var d=parts[pi];
+      for(var c=0;c<d.count;c++){
+        enemies.push(makeEnemyForType(d.type,plrLvl,idx,null,d));
+        idx++;
+      }
+    }
+
+    manualClearAndSetEncounter(enemies);
+    feedback+="\n<< Mixed encounter set: "+enemies.length+" enemies. >>";
+    return "";
+  });
+
+
+  text=text.replace(/\/spend\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
+    var s=plr.stats;
+    var parts=String(arg||"").trim().split(/\s+/);
+    if(parts.length<2){ feedback+="\n<< Usage: /spend 3 charisma 1 endurance >>"; return ""; }
+
+    var spendPairs=[];
+    for(var i=0;i<parts.length;i+=2){
+      var amt=parseInt(parts[i],10);
+      var stat=(parts[i+1]||"").toLowerCase();
+      stat = stat.replace(/[^a-z]/g,""); // strip punctuation like "charisma," or "willpower."
+      // Accept common aliases from dungeon UIs
+      if(stat==="strength") stat="might";
+      if(stat==="agility") stat="dexterity";
+      if(stat==="intelligence"||stat==="intellect") stat="cunning";
+      if(stat==="power") stat="might";
+      if(stat==="dex") stat="dexterity";
+      if(stat==="endu") stat="endurance";
+      if(stat==="will") stat="willpower";
+      if(stat==="cun") stat="cunning";
+      if(stat==="cha") stat="charisma";
+      if(!amt || !stat) break;
+      spendPairs.push({amt:amt, stat:stat});
+    }
+    if(!spendPairs.length){ feedback+="\n<< Usage: /spend 3 charisma 1 endurance >>"; return ""; }
+
+    var total=0;
+    for(var k=0;k<spendPairs.length;k++) total+=spendPairs[k].amt;
+
+    if((s.statPoints||0) < total){
+      feedback+="\n<< Not enough Stat Points. Unspent: "+(s.statPoints||0)+", needed: "+total+". >>";
+      return "";
+    }
+
+    for(var k2=0;k2<spendPairs.length;k2++){
+      var st=spendPairs[k2].stat;
+      var amt2=spendPairs[k2].amt;
+
+      if(st==="endurance"||st==="endu") s.endu += amt2;
+      else if(st==="dexterity"||st==="dex") s.dex += amt2;
+      else if(st==="might"||st==="str"||st==="power") s.might += amt2;
+      else if(st==="willpower"||st==="will") s.will += amt2;
+      else if(st==="cunning"||st==="cun") s.cun += amt2;
+      else if(st==="charisma"||st==="cha") s.cha += amt2;
+      else {
+        feedback+="\n<< Unknown stat: "+st+" >>";
+        return "";
+      }
+    }
+
+    s.statPoints -= total;
+    recomputeDerivedPoolsNew(s);
+    s.stam=tasClamp(s.stam,0,s.maxStam);
+    s.mana=tasClamp(s.mana,0,s.maxMana);
+    s.lust=tasClamp(s.lust,0,s.maxLust);
+
+    feedback+="\n<< Spent "+total+" Stat Points. Unspent: "+(s.statPoints||0)+". >>";
+    return "";
+  });
+
+  text=text.replace(/\/lvlupplayer\b(?:\s+(\d+))?/gi,function(_m,n){
+    var times=parseInt(n||"1",10); if(!times||times<1) times=1;
+    var s=plr.stats;
+    for(var i=0;i<times;i++){
+      s.lvl=(s.lvl||1)+1;
+      s.statPoints=(s.statPoints||0)+4;
+    }
+    recomputeDerivedPoolsNew(s);
+    s.stam=tasClamp(s.stam,0,s.maxStam);
+    s.mana=tasClamp(s.mana,0,s.maxMana);
+    s.lust=tasClamp(s.lust,0,s.maxLust);
+    feedback+="\n<< TEST: Player LVL set to "+s.lvl+". Stat Points now "+(s.statPoints||0)+". >>";
+    return "";
+  });
+
+  text=text.replace(/\/lvlupskill\s+([^\n|]+?)(?:\s+(\d+))?(?=$|\n)/gi,function(_m,name,n){
+    var nm=cleanSkillName(name||"");
+    var times=parseInt(n||"1",10); if(!times||times<1) times=1;
+    var idx=-1;
+    for(var i=0;i<plr.skills.name.length;i++){
+      var cand = cleanSkillName(plr.skills.name[i]||"");
+      if(cand.toLowerCase()===nm.toLowerCase()){ idx=i; break; }
+      // allow prefix match if user included extra numbering/words
+      if(idx<0 && cand.toLowerCase().indexOf(nm.toLowerCase())===0){ idx=i; }
+    }
+    if(idx<0){ feedback+="\n<< Skill not found: "+nm+" >>"; return ""; }
+
+    var before=Math.floor(plr.skills.lvl[idx]||1);
+    plr.skills.lvl[idx]=(plr.skills.lvl[idx]||1) + times;
+    var after=Math.floor(plr.skills.lvl[idx]||1);
+
+    for(var lv=before+1; lv<=after; lv++){
+      feedback += ensureSkillMilestoneEffect(plr, idx, lv);
+    }
+
+    feedback+="\n<< TEST: "+nm+" LVL is now "+(plr.skills.lvl[idx]||1).toFixed(2)+". >>";
+    return "";
+  });
+  text=text.replace(/\/setarchetype\s+([A-F])\b/gi,function(_m,code){
+    code=String(code||"").toUpperCase();
+    if(!ARCHETYPES[code]){
+      feedback+="\n<< Unknown archetype. Use A/B/C/D/E/F. >>";
+      return "";
+    }
+    plr.archetype=code;
+    applyArchetypeToStats(plr.stats, code);
+    recomputeDerivedPoolsNew(plr.stats);
+    plr.stats.stam=tasClamp(plr.stats.stam,0,plr.stats.maxStam);
+    plr.stats.mana=tasClamp(plr.stats.mana,0,plr.stats.maxMana);
+    plr.stats.lust=tasClamp(plr.stats.lust,0,plr.stats.maxLust);
+    feedback+="\n<< Archetype set: "+code+" ("+ARCHETYPES[code].name+"). >>";
+    return "";
+  });
+
+  if(feedback) text+=feedback;
+  return text;
+}
+
+/* ---------------------------------------------------------------------------
+   END-OF-TURN EFFECT TICKS
+--------------------------------------------------------------------------- */
+
+function tickAllEffects_EndOfTurn(){
+  tasEnsureStateAndPlayer();
+  var msg="";
+
+  var plr=state.players[state.playerList[0]];
+  if(plr){
+    // tick debuffs and buffs separately (both decay)
+    msg += tickEffectsOnEntity(plr, true);
+    plr.buffs = tickMapStacks(plr.buffs||{});
+  }
+
+  for(var i=0;i<state.encounter.enemies.length;i++){
+    var e=state.encounter.enemies[i];
+    if(e && e.stam>0){
+      msg += tickEffectsOnEntity(e, false);
+    }
+  }
+
+  return msg;
+}
+
+/* ---------------------------------------------------------------------------
+   MAIN HOOKS
+--------------------------------------------------------------------------- */
+
+function onInput_TASLEWD(text){
+    text = helpCommandInput_TASLEWD(text);
+  if(state.flags && state.flags._helpTurn) return text;
+
+tasEnsureStateAndPlayer();
+  state.turnCount=(state.turnCount||0)+1;
+
+  tasTickRecentlyDefeated();
+  lewdSkillsLoadFromSC();
+
+  state.lastPlayerInputLower = safeLower(text);
+
+  text=handleManualCommands(text);
+
+  // targeting changes may be embedded in a single action
+  var t=detectTargetFromText(text);
+  if(t){
+    if(t.type==="index") setTargetIndexIfValid(t.index);
+    else if(t.type==="descriptor") setTargetByBestDescriptorMatch(t.lower);
+  } else {
+    setTargetByBestDescriptorMatch(safeLower(text));
+  }
+
+  tasMaybeInferClassFromText(text);
+  autoDetectSkillsFromContext(text);
+
+  text=trySkillUse_PlayerOnly(text);
+
+  updateDeadPlrs();
+
+  storeStatsToSC();
+  storeSkillsToSC();
+  storeEncounterToSC();
+  storeCombatStateToSC();
+
+  return text;
+}
+
+function onOutput_TASLEWD(text){
+  tasEnsureStateAndPlayer();
+  // Help panels override normal output and should not advance systems.
+  if((state.flags && state.flags._forceOutputText) || state.commandCenter_TASLEWD){
+    var panel = (state.flags && state.flags._forceOutputText) ? state.flags._forceOutputText : state.commandCenter_TASLEWD;
+    // Ensure panel survives even if commandCenter was cleared elsewhere
+    state.commandCenter_TASLEWD = panel;
+    var out = helpCommandOutput_TASLEWD(text);
+    if(state.flags){
+      state.flags._helpTurn = false;
+      delete state.flags._forceOutputText;
+    }
+    return out;
+  }
+
+state.lastTurn.enemyActedInOutput=false;
+
+  tasTickRecentlyDefeated();
+  lewdSkillsLoadFromSC();
+
+  autoDetectSkillsFromContext(text);
+  tasMaybeInferClassFromText(text);
+
+  var forced = !!state.flags.forceEncounterScan;
+  if(forced) state.flags.forceEncounterScan=false;
+
+  detectAndSpawnEnemiesFromOutput(text, forced);
+
+  if(state.encounter.enemies.length>0){
+    state.combat.status="IN_COMBAT";
+    state.combat.hadEnemies=true;
+  }
+
+  var hurt=detectPlayerHurtFromOutput(text);
+  text=hurt.text;
+  state.lastTurn.enemyActedInOutput=hurt.enemyActed;
+
+  var autoTurn=enemyAutoTurnIfNeeded();
+  if(autoTurn) text+=autoTurn;
+
+  var effMsg = tickAllEffects_EndOfTurn();
+  if(effMsg) text += effMsg;
+
+  var inCombat = (state.combat.status==="IN_COMBAT" || state.encounter.enemies.length>0);
+
+  playerNaturalRegen_LustFalls(1, inCombat);
+  playerNaturalRegen_StamMana(1, inCombat);
+
+
+  updateDeadPlrs();
+  text = injectCombatResolutionIfNeeded(text);
+
+  storeStatsToSC();
+  storeSkillsToSC();
+  storeEncounterToSC();
+  storeCombatStateToSC();
+
+  return text;
+}
+
+/* Context hook: inject newly learned skill descriptions ONCE */
+function onContext_TASLEWD(text){
+  tasEnsureStateAndPlayer();
+  if(state.ctxInject && state.ctxInject.skillLines && state.ctxInject.skillLines.length){
+    var inject = "\n\n[SKILL UPDATE]\n"+state.ctxInject.skillLines.join("\n")+"\n";
+    // clear after one injection
+    state.ctxInject.skillLines=[];
+    return text + inject;
+  }
+  return text;
+}
+
+/* ============================================================================
+   END
+============================================================================ */
+
+
+/* ============================================================================
+/* ============================================================================
+   TAS-LEWD HELP SYSTEM (OUTPUT-INJECTED, TAS-style)
+
+   IMPORTANT:
+   - /help output should NOT be sent as player input to the model.
+   - We store the help panel in state.commandCenter_TASLEWD during onInput,
+     return " " (blank), then replace the model output during onOutput.
+
+   Hooks (must already exist in your script):
+   - In onInput_TASLEWD(text):  text = helpCommandInput_TASLEWD(text);
+   - In onOutput_TASLEWD(text): text = helpCommandOutput_TASLEWD(text);
+
+   Topics:
+   - /help (overview)
+   - /help commands
+   - /help stats
+   - /help skills
+   - /help combat
+   - /help encounter
+   - /help buffs
+   - /help storycards  (aliases: /help cards, /help storycard)
+   ========================================================================== */
+
+function helpCommandInput_TASLEWD(text){
+  tasEnsureState();
+
+  var raw = (text || "");
+  var tl  = raw.toLowerCase().trim();
+
+  // Only handle explicit /help invocations (allow extra spaces and leading ">" just in case)
+  // Examples handled: "/help", "/help stats", "> /help combat"
+  if(tl.indexOf("/help") === -1) return text;
+
+  // Canonicalize to a clean help topic string; default to base help
+  var topic = canonicalizeHelpTopic_TASLEWD(raw);
+  if(!topic || topic === "unknown") topic = "/help";
+
+  // Build panel text once and store for output replacement
+  var panel = buildHelpPanel_TASLEWD(topic);
+  state.commandCenter_TASLEWD = panel;
+
+  if(!state.flags) state.flags = {};
+  state.flags._helpTurn = true;
+  // Extra-safe output override (some AID stacks are picky about ordering)
+  state.flags._forceOutputText = panel;
+
+  // Return blank prompt so help is NOT sent to AI as user input
+  return " ";
+}
+
+function helpCommandOutput_TASLEWD(text){
+  tasEnsureState();
+
+  if(state.commandCenter_TASLEWD){
+    text = state.commandCenter_TASLEWD;
+  }
+
+  // Show once
+  delete state.commandCenter_TASLEWD;
+
+  return text;
+}
+
+function canonicalizeHelpTopic_TASLEWD(rawInput){
+  var s = (rawInput || "");
+
+  // Light HTML entity normalization (AID sometimes injects these)
+  s = s.replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/&amp;/g, "&");
+
+  // Collapse whitespace + trim
+  s = s.replace(/\s+/g, " ").trim();
+
+  // Extract from the first "/help"
+  var idx = s.toLowerCase().indexOf("/help");
+  if(idx === -1) return "/help";
+  s = s.slice(idx).trim();
+
+  // Normalize exactly "/help"
+  if(s.toLowerCase() === "/help") return "/help";
+
+  // Normalize common aliases
+  var low = s.toLowerCase();
+  if(low === "/help cards") return "/help storycards";
+  if(low === "/help storycard") return "/help storycards";
+
+  return s;
+}
+
+function buildHelpPanel_TASLEWD(topic){
+  var t = (topic || "/help").toLowerCase().trim();
+
+  function wrap(body){
+    return "<<\n" + body + "\n>>";
+  }
+
+  // ------------------------- BASE HELP -------------------------
+  if(t === "/help" || t === "/help taslewd" || t === "/help lewd"){
+    return wrap(
+"TAS-LEWD — SYSTEM OVERVIEW\n\n" +
+"This script adds a lust/stamina/mana combat + progression layer using STORY CARDS.\n" +
+"No violence/death language: defeat happens ONLY when stamina reaches 0.\n\n" +
+"NOTE ON ENCOUNTERS\n" +
+"Auto encounter detection is not perfect. If enemies aren't being recognized,\n" +
+"use /setencounter (recommended).\n\n" +
+"CORE STATS (6)\n" +
+"- Endurance: physical constitution; boosts Max Lust + Max Stamina\n" +
+"- Dexterity: physical finesse; physical hit/avoid; helps Lust reduction regen\n" +
+"- Might: physical force; boosts physical damage + Max Stamina + Stamina regen\n" +
+"- Willpower: mental constitution; boosts Max Lust + Max Mana\n" +
+"- Cunning: mental finesse; magical hit/avoid; boosts Mana regen + Lust reduction\n" +
+"- Charisma: mental force; boosts magical damage + Max Mana + Mana regen\n\n" +
+"RESOURCES\n" +
+"- Lust: fills when you take arousal/lust pressure. At max, you climax.\n" +
+"- Stamina: your 'health' equivalent. Climax drains stamina. At 0 stamina, you're defeated.\n" +
+"- Mana: fuels magical/hybrid skills.\n\n" +
+"CLIMAX & DEFEAT\n" +
+"- When Lust reaches Max: you climax → lose stamina (10–50% of max, based on the hit).\n" +
+"- Lust then drops to a partial value based on current stamina (not a full reset).\n" +
+"- Defeat occurs ONLY when stamina reaches 0.\n\n" +
+"BEST WAYS TO TRIGGER SYSTEM FEATURES\n" +
+"Encounters:\n" +
+"- Best: /setencounter 2 small blue slime girls and 1 large pink slime\n" +
+"- Auto detection looks for words like enemy/creature/monster/opponent/attacker\n" +
+"  plus a creature name in the narration.\n\n" +
+"Skills:\n" +
+"- Best: “You learn <Skill Name>” OR manual: /addskill \"<Skill Name>\" magical T1\n" +
+"- Casting: “cast <Skill Name>” or “use <Skill Name>” (exact full name recommended).\n\n" +
+"Basic attacks:\n" +
+"- Use verbs like tease, tickle, fuck, thrust, finger, kiss, grope, stroke, spank, bind.\n\n" +
+"HELP TOPICS\n" +
+"- /help commands\n" +
+"- /help stats\n" +
+"- /help skills\n" +
+"- /help combat\n" +
+"- /help encounter\n" +
+"- /help buffs\n" +
+"- /help storycards\n"
+    );
+  }
+
+  // ------------------------- COMMANDS -------------------------
+  if(t.indexOf("/help commands") === 0){
+    return wrap(
+"COMMANDS (Manual)\n\n" +
+"Help:\n" +
+"- /help\n" +
+"- /help <topic>\n\n" +
+"Stats / Levels:\n" +
+"- /spend <n> <stat> <n> <stat> ...\n" +
+"  Example: /spend 3 charisma 1 endurance\n" +
+"- /lvlupplayer [N]\n" +
+"- /lvlupskill \"<Skill Name>\" [N]\n" +
+"- /setarchetype <A|B|C|D|E|F>\n\n" +
+"Skills:\n" +
+"- /addskill \"<Skill Name>\" <physical|magical|hybrid> <tier T1|T2|T3|T4>\n" +
+"- /listskills\n\n" +
+"Encounters:\n" +
+"- /setencounter <free text>\n" +
+"- /listenemies\n" +
+"- /clearencounter\n\n" +
+"Combat:\n" +
+"- /combat on\n" +
+"- /combat off\n"
+    );
+  }
+
+  // ------------------------- STATS -------------------------
+  if(t.indexOf("/help stats") === 0){
+    return wrap(
+"STATS / RESOURCES\n\n" +
+"Stats: Endurance, Dexterity, Might, Willpower, Cunning, Charisma\n\n" +
+"Derived maximums:\n" +
+"- Max Lust = f(Endurance, Willpower)\n" +
+"- Max Stamina = f(Endurance, Might)\n" +
+"- Max Mana = f(Willpower, Charisma)\n\n" +
+"Regen (out of combat):\n" +
+"- Stamina Regen = f(Might, Dexterity)\n" +
+"- Mana Regen = f(Cunning, Charisma)\n" +
+"- Lust reduction Regen = f(Cunning, Dexterity)\n" +
+"In combat regen = 1/10 of those values.\n\n" +
+"Climax:\n" +
+"- Lust fills on pressure; at Max → climax drains stamina; lust drops partially.\n" +
+"Defeat:\n" +
+"- Stamina reaches 0.\n"
+    );
+  }
+
+  // ------------------------- COMBAT -------------------------
+  if(t.indexOf("/help combat") === 0){
+    return wrap(
+"COMBAT\n\n" +
+"Start:\n" +
+"- Usually when an encounter is detected or when you /setencounter.\n" +
+"- Auto detection can miss — /setencounter is recommended.\n\n" +
+"Basic attack language (examples):\n" +
+"tease, tickle, fuck, thrust, finger, kiss, grope, stroke, grind, ride, edge, spank, bind\n\n" +
+"Skill usage language:\n" +
+"- “cast <Skill Name>”\n" +
+"- “use <Skill Name>”\n" +
+"- or type the exact full skill name.\n\n" +
+"Targeting language:\n" +
+"- “enemy 2”, “slime creature 3”, “third slime”, “the second one”, etc.\n\n" +
+"End:\n" +
+"- All enemies stamina 0 → combat over.\n" +
+"- Player stamina 0 → player defeated.\n"
+    );
+  }
+
+  // ------------------------- SKILLS -------------------------
+  if(t.indexOf("/help skills") === 0){
+    return wrap(
+"SKILLS\n\n" +
+"Manual add (recommended):\n" +
+"- /addskill \"<Skill Name>\" <physical|magical|hybrid> <tier T1|T2|T3|T4>\n\n" +
+"Learning detection (if enabled):\n" +
+"- Phrases like “learn”, “unlock”, “gain skill/spell”, “acquired” near a named skill.\n\n" +
+"Casting detection:\n" +
+"- “cast <Skill Name>”, “use <Skill Name>”, or the exact full skill name.\n\n" +
+"Scaling:\n" +
+"- Physical: hit=Dexterity, damage=Might\n" +
+"- Magical: hit=Cunning, damage=Charisma\n" +
+"- Hybrid: hit=Dexterity, damage=Charisma\n\n" +
+"Leveling:\n" +
+"- Small damage boost per level.\n" +
+"- Every 5 levels: advanced effect (buff/debuff/extra shot). Drawbacks remain.\n"
+    );
+  }
+
+  // ------------------------- ENCOUNTERS -------------------------
+  if(t.indexOf("/help encounter") === 0){
+    return wrap(
+"ENCOUNTERS / ENEMY TRACKING\n\n" +
+"Auto encounter detection is NOT perfect.\n" +
+"Strongly recommended: use /setencounter.\n\n" +
+"Manual:\n" +
+"- /setencounter 2 small blue slime girls and 1 large pink slime\n" +
+"- /listenemies\n" +
+"- /clearencounter\n\n" +
+"Auto detection looks for encounter words like:\n" +
+"enemy, creature, monster, opponent, stranger, attacker\n" +
+"then attempts to pull a name/descriptor.\n\n" +
+"Enemies are generated below human stats at equal level (roughly 20–40%).\n"
+    );
+  }
+
+  // ------------------------- BUFFS -------------------------
+  if(t.indexOf("/help buffs") === 0){
+    return wrap(
+"BUFFS / DEBUFFS (STACKS)\n\n" +
+"Single number = strength + duration.\n" +
+"Example: 3 stacks deals/affects at 3 power and lasts 3 turns.\n" +
+"Stacks tick down by 1 at end of turn.\n\n" +
+"Player buffs go on Player Stats card.\n" +
+"Enemy debuffs go on Encounter card.\n"
+    );
+  }
+
+  // ------------------------- STORYCARDS -------------------------
+  if(t.indexOf("/help storycards") === 0){
+    return wrap(
+"STORY CARDS\n\n" +
+"This system stores state in story cards (arrays), not objects.\n\n" +
+"Typical cards:\n" +
+"- Player Stats\n" +
+"- Skills\n" +
+"- Encounter / Enemies\n" +
+"- Combat State\n\n" +
+"Manual recovery tools:\n" +
+"- /setencounter, /clearencounter\n" +
+"- /addskill, /listskills\n" +
+"- /setarchetype\n"
+    );
+  }
+
+  // Fallback: never show unknown — show base help instead
+  return buildHelpPanel_TASLEWD("/help");
+}
+
+/* ========================= END TAS-LEWD HELP SYSTEM ========================= */

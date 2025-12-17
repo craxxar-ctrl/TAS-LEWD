@@ -1,0 +1,11 @@
+// TAS LEWD Output Script
+
+// Every script needs a modifier function
+const modifier = (text) => {
+  text = onOutput_TASLEWD(text);
+ 
+  return { text }
+}//end of modifier
+
+// Don't modify this part
+modifier(text)
