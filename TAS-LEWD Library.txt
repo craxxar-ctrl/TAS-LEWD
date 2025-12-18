@@ -2166,7 +2166,7 @@ function handleManualCommands(text){
 
   var feedback="";
 
-  text=text.replace(/\/addskill\s+([^\n|]+?)(?:\s*\|\s*([^\n]+))?(?=$|\n)/gi,
+  text=text.replace(/\/lasaddskill\s+([^\n|]+?)(?:\s*\|\s*([^\n]+))?(?=$|\n)/gi,
     function(_m,name,descRaw){
       var res=ensureSkillFactory(plr,name);
       if(res.idx>=0 && descRaw&&descRaw.trim()){
@@ -2235,10 +2235,10 @@ function handleManualCommands(text){
     return "";
   });
 
-  text=text.replace(/\/setencounter\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
+  text=text.replace(/\/lassetencounter\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
     var parts=parseEncounterParts(arg||"");
     if(!parts){
-      feedback+="\n<< Encounter parse failed. Example: /setencounter 2 small blue slime girls (female), 1 large pink slime (futanari) >>";
+      feedback+="\n<< Encounter parse failed. Example: /lassetencounter 2 small blue slime girls (female), 1 large pink slime (futanari) >>";
       return "";
     }
 
@@ -2284,10 +2284,10 @@ function handleManualCommands(text){
   });
 
 
-  text=text.replace(/\/spend\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
+  text=text.replace(/\/lasspend\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
     var s=plr.stats;
     var parts=String(arg||"").trim().split(/\s+/);
-    if(parts.length<2){ feedback+="\n<< Usage: /spend 3 charisma 1 endurance >>"; return ""; }
+    if(parts.length<2){ feedback+="\n<< Usage: /lasspend 3 charisma 1 endurance >>"; return ""; }
 
     var spendPairs=[];
     for(var i=0;i<parts.length;i+=2){
@@ -2307,7 +2307,7 @@ function handleManualCommands(text){
       if(!amt || !stat) break;
       spendPairs.push({amt:amt, stat:stat});
     }
-    if(!spendPairs.length){ feedback+="\n<< Usage: /spend 3 charisma 1 endurance >>"; return ""; }
+    if(!spendPairs.length){ feedback+="\n<< Usage: /lasspend 3 charisma 1 endurance >>"; return ""; }
 
     var total=0;
     for(var k=0;k<spendPairs.length;k++) total+=spendPairs[k].amt;
@@ -2343,7 +2343,7 @@ function handleManualCommands(text){
     return "";
   });
 
-  text=text.replace(/\/lvlupplayer\b(?:\s+(\d+))?/gi,function(_m,n){
+  text=text.replace(/\/laslvlupplayer\b(?:\s+(\d+))?/gi,function(_m,n){
     var times=parseInt(n||"1",10); if(!times||times<1) times=1;
     var s=plr.stats;
     for(var i=0;i<times;i++){
@@ -2358,7 +2358,7 @@ function handleManualCommands(text){
     return "";
   });
 
-  text=text.replace(/\/lvlupskill\s+([^\n|]+?)(?:\s+(\d+))?(?=$|\n)/gi,function(_m,name,n){
+  text=text.replace(/\/laslvlupskill\s+([^\n|]+?)(?:\s+(\d+))?(?=$|\n)/gi,function(_m,name,n){
     var nm=cleanSkillName(name||"");
     var times=parseInt(n||"1",10); if(!times||times<1) times=1;
     var idx=-1;
@@ -2381,7 +2381,7 @@ function handleManualCommands(text){
     feedback+="\n<< TEST: "+nm+" LVL is now "+(plr.skills.lvl[idx]||1).toFixed(2)+". >>";
     return "";
   });
-  text=text.replace(/\/setarchetype\s+([A-F])\b/gi,function(_m,code){
+  text=text.replace(/\/lassetarchetype\s+([A-F])\b/gi,function(_m,code){
     code=String(code||"").toUpperCase();
     if(!ARCHETYPES[code]){
       feedback+="\n<< Unknown archetype. Use A/B/C/D/E/F. >>";
@@ -2547,10 +2547,10 @@ function onContext_TASLEWD(text){
 
 /* ============================================================================
 /* ============================================================================
-   TAS-LEWD HELP SYSTEM (OUTPUT-INJECTED, TAS-style)
+   LAS HELP SYSTEM (OUTPUT-INJECTED, TAS-style)
 
    IMPORTANT:
-   - /help output should NOT be sent as player input to the model.
+   - /lashelp output should NOT be sent as player input to the model.
    - We store the help panel in state.commandCenter_TASLEWD during onInput,
      return " " (blank), then replace the model output during onOutput.
 
@@ -2559,14 +2559,14 @@ function onContext_TASLEWD(text){
    - In onOutput_TASLEWD(text): text = helpCommandOutput_TASLEWD(text);
 
    Topics:
-   - /help (overview)
-   - /help commands
-   - /help stats
-   - /help skills
-   - /help combat
-   - /help encounter
-   - /help buffs
-   - /help storycards  (aliases: /help cards, /help storycard)
+   - /lashelp (overview)
+   - /lashelp commands
+   - /lashelp stats
+   - /lashelp skills
+   - /lashelp combat
+   - /lashelp encounter
+   - /lashelp buffs
+   - /lashelp storycards  (aliases: /lashelp cards, /lashelp storycard)
    ========================================================================== */
 
 function helpCommandInput_TASLEWD(text){
@@ -2575,13 +2575,13 @@ function helpCommandInput_TASLEWD(text){
   var raw = (text || "");
   var tl  = raw.toLowerCase().trim();
 
-  // Only handle explicit /help invocations (allow extra spaces and leading ">" just in case)
-  // Examples handled: "/help", "/help stats", "> /help combat"
-  if(tl.indexOf("/help") === -1) return text;
+  // Only handle explicit /lashelp invocations (allow extra spaces and leading ">" just in case)
+  // Examples handled: "/lashelp", "/lashelp stats", "> /lashelp combat"
+  if(tl.indexOf("/lashelp") === -1) return text;
 
   // Canonicalize to a clean help topic string; default to base help
   var topic = canonicalizeHelpTopic_TASLEWD(raw);
-  if(!topic || topic === "unknown") topic = "/help";
+  if(!topic || topic === "unknown") topic = "/lashelp";
 
   // Build panel text once and store for output replacement
   var panel = buildHelpPanel_TASLEWD(topic);
@@ -2618,38 +2618,38 @@ function canonicalizeHelpTopic_TASLEWD(rawInput){
   // Collapse whitespace + trim
   s = s.replace(/\s+/g, " ").trim();
 
-  // Extract from the first "/help"
-  var idx = s.toLowerCase().indexOf("/help");
-  if(idx === -1) return "/help";
+  // Extract from the first "/lashelp"
+  var idx = s.toLowerCase().indexOf("/lashelp");
+  if(idx === -1) return "/lashelp";
   s = s.slice(idx).trim();
 
-  // Normalize exactly "/help"
-  if(s.toLowerCase() === "/help") return "/help";
+  // Normalize exactly "/lashelp"
+  if(s.toLowerCase() === "/lashelp") return "/lashelp";
 
   // Normalize common aliases
   var low = s.toLowerCase();
-  if(low === "/help cards") return "/help storycards";
-  if(low === "/help storycard") return "/help storycards";
+  if(low === "/lashelp cards") return "/lashelp storycards";
+  if(low === "/lashelp storycard") return "/lashelp storycards";
 
   return s;
 }
 
 function buildHelpPanel_TASLEWD(topic){
-  var t = (topic || "/help").toLowerCase().trim();
+  var t = (topic || "/lashelp").toLowerCase().trim();
 
   function wrap(body){
     return "<<\n" + body + "\n>>";
   }
 
   // ------------------------- BASE HELP -------------------------
-  if(t === "/help" || t === "/help taslewd" || t === "/help lewd"){
+  if(t === "/lashelp" || t === "/lashelp taslewd" || t === "/lashelp lewd"){
     return wrap(
-"TAS-LEWD — SYSTEM OVERVIEW\n\n" +
+"LAS — SYSTEM OVERVIEW\n\n" +
 "This script adds a lust/stamina/mana combat + progression layer using STORY CARDS.\n" +
 "No violence/death language: defeat happens ONLY when stamina reaches 0.\n\n" +
 "NOTE ON ENCOUNTERS\n" +
 "Auto encounter detection is not perfect. If enemies aren't being recognized,\n" +
-"use /setencounter (recommended).\n\n" +
+"use /lassetencounter (recommended).\n\n" +
 "CORE STATS (6)\n" +
 "- Endurance: physical constitution; boosts Max Lust + Max Stamina\n" +
 "- Dexterity: physical finesse; physical hit/avoid; helps Lust reduction regen\n" +
@@ -2667,53 +2667,53 @@ function buildHelpPanel_TASLEWD(topic){
 "- Defeat occurs ONLY when stamina reaches 0.\n\n" +
 "BEST WAYS TO TRIGGER SYSTEM FEATURES\n" +
 "Encounters:\n" +
-"- Best: /setencounter 2 small blue slime girls and 1 large pink slime\n" +
+"- Best: /lassetencounter 2 small blue slime girls and 1 large pink slime\n" +
 "- Auto detection looks for words like enemy/creature/monster/opponent/attacker\n" +
 "  plus a creature name in the narration.\n\n" +
 "Skills:\n" +
-"- Best: “You learn <Skill Name>” OR manual: /addskill \"<Skill Name>\" magical T1\n" +
+"- Best: “You learn <Skill Name>” OR manual: /lasaddskill \"<Skill Name>\" magical T1\n" +
 "- Casting: “cast <Skill Name>” or “use <Skill Name>” (exact full name recommended).\n\n" +
 "Basic attacks:\n" +
 "- Use verbs like tease, tickle, fuck, thrust, finger, kiss, grope, stroke, spank, bind.\n\n" +
 "HELP TOPICS\n" +
-"- /help commands\n" +
-"- /help stats\n" +
-"- /help skills\n" +
-"- /help combat\n" +
-"- /help encounter\n" +
-"- /help buffs\n" +
-"- /help storycards\n"
+"- /lashelp commands\n" +
+"- /lashelp stats\n" +
+"- /lashelp skills\n" +
+"- /lashelp combat\n" +
+"- /lashelp encounter\n" +
+"- /lashelp buffs\n" +
+"- /lashelp storycards\n"
     );
   }
 
   // ------------------------- COMMANDS -------------------------
-  if(t.indexOf("/help commands") === 0){
+  if(t.indexOf("/lashelp commands") === 0){
     return wrap(
 "COMMANDS (Manual)\n\n" +
 "Help:\n" +
-"- /help\n" +
-"- /help <topic>\n\n" +
+"- /lashelp\n" +
+"- /lashelp <topic>\n\n" +
 "Stats / Levels:\n" +
-"- /spend <n> <stat> <n> <stat> ...\n" +
-"  Example: /spend 3 charisma 1 endurance\n" +
-"- /lvlupplayer [N]\n" +
-"- /lvlupskill \"<Skill Name>\" [N]\n" +
-"- /setarchetype <A|B|C|D|E|F>\n\n" +
+"- /lasspend <n> <stat> <n> <stat> ...\n" +
+"  Example: /lasspend 3 charisma 1 endurance\n" +
+"- /laslvlupplayer [N]\n" +
+"- /laslvlupskill \"<Skill Name>\" [N]\n" +
+"- /lassetarchetype <A|B|C|D|E|F>\n\n" +
 "Skills:\n" +
-"- /addskill \"<Skill Name>\" <physical|magical|hybrid> <tier T1|T2|T3|T4>\n" +
-"- /listskills\n\n" +
+"- /lasaddskill \"<Skill Name>\" <physical|magical|hybrid> <tier T1|T2|T3|T4>\n" +
+"- /laslistskills\n\n" +
 "Encounters:\n" +
-"- /setencounter <free text>\n" +
-"- /listenemies\n" +
-"- /clearencounter\n\n" +
+"- /lassetencounter <free text>\n" +
+"- /laslistenemies\n" +
+"- /lasclearencounter\n\n" +
 "Combat:\n" +
-"- /combat on\n" +
-"- /combat off\n"
+"- /lascombat on\n" +
+"- /lascombat off\n"
     );
   }
 
   // ------------------------- STATS -------------------------
-  if(t.indexOf("/help stats") === 0){
+  if(t.indexOf("/lashelp stats") === 0){
     return wrap(
 "STATS / RESOURCES\n\n" +
 "Stats: Endurance, Dexterity, Might, Willpower, Cunning, Charisma\n\n" +
@@ -2734,12 +2734,12 @@ function buildHelpPanel_TASLEWD(topic){
   }
 
   // ------------------------- COMBAT -------------------------
-  if(t.indexOf("/help combat") === 0){
+  if(t.indexOf("/lashelp combat") === 0){
     return wrap(
 "COMBAT\n\n" +
 "Start:\n" +
-"- Usually when an encounter is detected or when you /setencounter.\n" +
-"- Auto detection can miss — /setencounter is recommended.\n\n" +
+"- Usually when an encounter is detected or when you /lassetencounter.\n" +
+"- Auto detection can miss — /lassetencounter is recommended.\n\n" +
 "Basic attack language (examples):\n" +
 "tease, tickle, fuck, thrust, finger, kiss, grope, stroke, grind, ride, edge, spank, bind\n\n" +
 "Skill usage language:\n" +
@@ -2755,11 +2755,11 @@ function buildHelpPanel_TASLEWD(topic){
   }
 
   // ------------------------- SKILLS -------------------------
-  if(t.indexOf("/help skills") === 0){
+  if(t.indexOf("/lashelp skills") === 0){
     return wrap(
 "SKILLS\n\n" +
 "Manual add (recommended):\n" +
-"- /addskill \"<Skill Name>\" <physical|magical|hybrid> <tier T1|T2|T3|T4>\n\n" +
+"- /lasaddskill \"<Skill Name>\" <physical|magical|hybrid> <tier T1|T2|T3|T4>\n\n" +
 "Learning detection (if enabled):\n" +
 "- Phrases like “learn”, “unlock”, “gain skill/spell”, “acquired” near a named skill.\n\n" +
 "Casting detection:\n" +
@@ -2775,15 +2775,15 @@ function buildHelpPanel_TASLEWD(topic){
   }
 
   // ------------------------- ENCOUNTERS -------------------------
-  if(t.indexOf("/help encounter") === 0){
+  if(t.indexOf("/lashelp encounter") === 0){
     return wrap(
 "ENCOUNTERS / ENEMY TRACKING\n\n" +
 "Auto encounter detection is NOT perfect.\n" +
-"Strongly recommended: use /setencounter.\n\n" +
+"Strongly recommended: use /lassetencounter.\n\n" +
 "Manual:\n" +
-"- /setencounter 2 small blue slime girls and 1 large pink slime\n" +
-"- /listenemies\n" +
-"- /clearencounter\n\n" +
+"- /lassetencounter 2 small blue slime girls and 1 large pink slime\n" +
+"- /laslistenemies\n" +
+"- /lasclearencounter\n\n" +
 "Auto detection looks for encounter words like:\n" +
 "enemy, creature, monster, opponent, stranger, attacker\n" +
 "then attempts to pull a name/descriptor.\n\n" +
@@ -2792,7 +2792,7 @@ function buildHelpPanel_TASLEWD(topic){
   }
 
   // ------------------------- BUFFS -------------------------
-  if(t.indexOf("/help buffs") === 0){
+  if(t.indexOf("/lashelp buffs") === 0){
     return wrap(
 "BUFFS / DEBUFFS (STACKS)\n\n" +
 "Single number = strength + duration.\n" +
@@ -2804,7 +2804,7 @@ function buildHelpPanel_TASLEWD(topic){
   }
 
   // ------------------------- STORYCARDS -------------------------
-  if(t.indexOf("/help storycards") === 0){
+  if(t.indexOf("/lashelp storycards") === 0){
     return wrap(
 "STORY CARDS\n\n" +
 "This system stores state in story cards (arrays), not objects.\n\n" +
@@ -2814,14 +2814,14 @@ function buildHelpPanel_TASLEWD(topic){
 "- Encounter / Enemies\n" +
 "- Combat State\n\n" +
 "Manual recovery tools:\n" +
-"- /setencounter, /clearencounter\n" +
-"- /addskill, /listskills\n" +
-"- /setarchetype\n"
+"- /lassetencounter, /lasclearencounter\n" +
+"- /lasaddskill, /laslistskills\n" +
+"- /lassetarchetype\n"
     );
   }
 
   // Fallback: never show unknown — show base help instead
-  return buildHelpPanel_TASLEWD("/help");
+  return buildHelpPanel_TASLEWD("/lashelp");
 }
 
-/* ========================= END TAS-LEWD HELP SYSTEM ========================= */
+/* ========================= END LAS HELP SYSTEM ========================= */
