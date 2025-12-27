@@ -1,5 +1,5 @@
 /* ============================================================================
-   TAS-LEWD – Designed by Craxxer through Chat GPT
+   LAS Lewd Auto Stats – Designed by Craxxer through Chat GPT
    Based on:
    // TRUE AUTOMATIC STATS (TAS) SCRIPT by Yi1i1i
    // jackoneill2443 - Idea for input flavor text to show stat results
@@ -8,6 +8,7 @@
    //
 ============================================================================ */
 
+/* 
 /* ---------------------------------------------------------------------------
    LANGUAGE / DETECTION ARRAYS
 --------------------------------------------------------------------------- */
@@ -21,13 +22,36 @@ var combatContextWords = [
   "chases","chasing","pursues","pursuing","presses the advantage"
 ];
 
-var attackWords = [
+var sexualAttackWords = [
   "kiss","caress","stroke","grope","fondle","massage","tease","spank",
   "thrust","thrusts","thrusting","finger","fingers","fingering",
   "grind","rub","suck","lick","nibble","bite","ride","mount",
   "edge","stimulate","pet","grip","pin","tie","dominate","command",
   "tickle","fuck","pump","breed","rail","pleasure","work over"
 ];
+
+// Out-of-combat only: self-directed release commands (lust reset)
+var masturbateWords = [
+  "masturbate","masturbates","masturbating",
+  "jerk","jerks","jerking",
+  "jill","jills","jilling",
+  "touch","touches","touching",
+  "rub","rubs","rubbing",
+  "stroke","strokes","stroking",
+  "finger","fingers","fingering",
+  "edge","edges","edging"
+];
+
+// Legacy alias used throughout the script; keep it pointed at combat sexual attacks only.
+
+// Out-of-combat only: triggers lust-only rest ("release")
+var sexWords = [
+  "sex","sexy","aroused","arousal","horny","lusty","wet","slick",
+  "masturbate","masturbates","masturbating","jerk","jerking","jill","jilling",
+  "touch","touching","rub","rubbing","stroke","stroking","finger","fingering",
+  "edge","edging","orgasm","climax","cum","cumming","release"
+];
+var attackWords = sexualAttackWords;
 
 var climaxWords = [
   "orgasm","orgasms","climax","climaxes","cum","cums","cumming",
@@ -173,7 +197,142 @@ function tasContainsAny(textLower, arr){
     if(textLower.indexOf(arr[i].toLowerCase())!==-1) return true;
   }
   return false;
+};
+
+
+function shortAdvancedEffectLabel(adv){
+  if(!adv) return "enhanced effect";
+  return "applies "+adv;
 }
+
+// ------------------------- BUFF / DEBUFF EFFECTS -------------------------
+// Effects are stored as key -> stacks (single integer).
+// % effects: stacks = duration only (magnitude fixed).
+// Flat over-time: stacks = strength AND duration; each tick uses current stacks then reduces by 1.
+
+var EFFECT_DEFS = {
+  // Lust over-time (flat)
+  "Aphrodisiac": {kind:"+debuff", tick:"lust+",  pct:0,  flat:true},
+  "Relief":      {kind:"+buff",   tick:"lust-",  pct:0,  flat:true},
+
+  // Stamina over-time (flat, rare)
+  "Fatigue":     {kind:"+debuff", tick:"stam-",  pct:0,  flat:true},
+  "Invigorate":  {kind:"+buff",   tick:"stam+",  pct:0,  flat:true},
+
+  // % Lust output (duration only)
+  "Alluring":    {kind:"%buff",   tick:null, pct:+0.20, flat:false, domain:"lust_out"},
+  "Dulled":      {kind:"%debuff", tick:null, pct:-0.20, flat:false, domain:"lust_out"},
+
+  // % Lust taken (duration only)
+  "Sensitive":     {kind:"%debuff", tick:null, pct:+0.20, flat:false, domain:"lust_in"},
+  "Desensitized":  {kind:"%buff",   tick:null, pct:-0.20, flat:false, domain:"lust_in"},
+
+  // % Player stat mods (duration only) - rounded to nearest whole number
+  "EnduranceUp":   {kind:"%buff",   tick:null, pct:+0.15, flat:false, domain:"stat", stat:"endu"},
+  "EnduranceDown": {kind:"%debuff", tick:null, pct:-0.15, flat:false, domain:"stat", stat:"endu"},
+  "DexterityUp":   {kind:"%buff",   tick:null, pct:+0.15, flat:false, domain:"stat", stat:"dex"},
+  "DexterityDown": {kind:"%debuff", tick:null, pct:-0.15, flat:false, domain:"stat", stat:"dex"},
+  "MightUp":       {kind:"%buff",   tick:null, pct:+0.15, flat:false, domain:"stat", stat:"might"},
+  "MightDown":     {kind:"%debuff", tick:null, pct:-0.15, flat:false, domain:"stat", stat:"might"},
+  "WillpowerUp":   {kind:"%buff",   tick:null, pct:+0.15, flat:false, domain:"stat", stat:"will"},
+  "WillpowerDown": {kind:"%debuff", tick:null, pct:-0.15, flat:false, domain:"stat", stat:"will"},
+  "CunningUp":     {kind:"%buff",   tick:null, pct:+0.15, flat:false, domain:"stat", stat:"cun"},
+  "CunningDown":   {kind:"%debuff", tick:null, pct:-0.15, flat:false, domain:"stat", stat:"cun"},
+  "CharismaUp":    {kind:"%buff",   tick:null, pct:+0.15, flat:false, domain:"stat", stat:"cha"},
+  "CharismaDown":  {kind:"%debuff", tick:null, pct:-0.15, flat:false, domain:"stat", stat:"cha"}
+};
+
+function effectIsPercent(key){
+  var d = EFFECT_DEFS[key];
+  return !!(d && !d.flat);
+}
+
+function addEffectStacks(map, key, addStacks){
+  if(!map || !key || !addStacks) return;
+  map[key] = (map[key]||0) + addStacks;
+  if(map[key] < 0) map[key] = 0;
+}
+
+function tickEffectMap(map, targetStats, targetResources){
+  if(!map) return;
+  for(var k in map){
+    if(!map.hasOwnProperty(k)) continue;
+    var stacks = Number(map[k]||0);
+    if(stacks<=0){ delete map[k]; continue; }
+    var def = EFFECT_DEFS[k];
+    if(def && def.flat && def.tick){
+      // Flat OT tick uses current stacks as magnitude, then stacks--
+      if(def.tick==="lust+"){
+        if(targetStats) targetStats.lust = (targetStats.lust||0) + stacks;
+        if(targetResources) targetResources.lust = (targetResources.lust||0) + stacks;
+      } else if(def.tick==="lust-"){
+        if(targetStats) targetStats.lust = tasClamp((targetStats.lust||0) - stacks, 0, (targetStats.maxLust||999));
+        if(targetResources) targetResources.lust = tasClamp((targetResources.lust||0) - stacks, 0, (targetResources.lustMax||999));
+      } else if(def.tick==="stam-"){
+        if(targetStats) targetStats.stam = tasClamp((targetStats.stam||0) - stacks, 0, (targetStats.maxStam||999));
+        if(targetResources) targetResources.stamina = tasClamp((targetResources.stamina||0) - stacks, 0, (targetResources.staminaMax||999));
+      } else if(def.tick==="stam+"){
+        if(targetStats) targetStats.stam = tasClamp((targetStats.stam||0) + stacks, 0, (targetStats.maxStam||999));
+        if(targetResources) targetResources.stamina = tasClamp((targetResources.stamina||0) + stacks, 0, (targetResources.staminaMax||999));
+      }
+    }
+    // All effects tick duration by 1 each advance.
+    stacks = stacks - 1;
+    if(stacks<=0) delete map[k]; else map[k]=stacks;
+  }
+}
+
+function advanceAllEffectsOneTick(){
+  // Player effects
+  if(state.players && state.playerList && state.playerList.length){
+    var plr = state.players[state.playerList[0]];
+    if(plr){
+      plr.buffs = plr.buffs || {};
+      plr.debuffs = plr.debuffs || {};
+      tickEffectMap(plr.buffs, plr.stats, plr.resources);
+      tickEffectMap(plr.debuffs, plr.stats, plr.resources);
+    }
+  }
+  // Enemy effects in active encounter
+  if(state.encounter && state.encounter.enemies && state.encounter.enemies.length){
+    for(var i=0;i<state.encounter.enemies.length;i++){
+      var e = state.encounter.enemies[i];
+      if(!e) continue;
+      e.debuffs = e.debuffs || {};
+      e.buffs = e.buffs || {};
+      // Enemies mainly use debuffs for lust; tick against enemy lust field if present.
+      var eStats = {lust:(e.lust||0), maxLust:(e.maxLust||999)};
+      tickEffectMap(e.debuffs, eStats, null);
+      tickEffectMap(e.buffs, eStats, null);
+      e.lust = eStats.lust;
+    }
+    storeEncounterToSC();
+  }
+}
+
+function clearAllEffects(){
+  if(state.players && state.playerList && state.playerList.length){
+    var plr = state.players[state.playerList[0]];
+    if(plr){ plr.buffs = {}; plr.debuffs = {}; }
+  }
+  if(state.encounter && state.encounter.enemies && state.encounter.enemies.length){
+    for(var i=0;i<state.encounter.enemies.length;i++){
+      var e = state.encounter.enemies[i];
+      if(e){ e.buffs = {}; e.debuffs = {}; }
+    }
+    storeEncounterToSC();
+  }
+}
+
+// number formatter used in description/encounter displays
+function fmt(n){
+  if(n===undefined || n===null) return "0";
+  var x=Number(n);
+  if(isNaN(x)) return "0";
+  var r=Math.round(x*10)/10;
+  return (r%1===0) ? String(r.toFixed(0)) : String(r);
+}
+
 
 function cleanSkillName(raw){
   if(!raw) return "";
@@ -277,6 +436,43 @@ function recomputeDerivedPoolsNew(s){
    ARCHETYPES
 --------------------------------------------------------------------------- */
 
+
+function getEffectivePlayerStats(plr){
+  // Returns a shallow copy of stats with active % stat effects applied, then derived pools recomputed.
+  if(!plr || !plr.stats) return null;
+  var s = {};
+  for(var k in plr.stats){ if(plr.stats.hasOwnProperty(k)) s[k]=plr.stats[k]; }
+
+  var buffs = plr.buffs || {};
+  var debuffs = plr.debuffs || {};
+  // Apply % stat modifiers (duration-only; magnitude fixed)
+  for(var e in buffs){
+    if(!buffs.hasOwnProperty(e) || !(buffs[e]>0)) continue;
+    var d = EFFECT_DEFS[e];
+    if(d && d.domain==="stat" && d.stat){
+      s[d.stat] = Math.round((s[d.stat]||0) * (1.0 + Math.abs(d.pct)));
+    }
+  }
+  for(var e2 in debuffs){
+    if(!debuffs.hasOwnProperty(e2) || !(debuffs[e2]>0)) continue;
+    var d2 = EFFECT_DEFS[e2];
+    if(d2 && d2.domain==="stat" && d2.stat){
+      s[d2.stat] = Math.round((s[d2.stat]||0) * (1.0 - Math.abs(d2.pct)));
+    }
+  }
+
+  // Keep stats from going below 1
+  s.endu = Math.max(1, Math.round(s.endu||0));
+  s.dex = Math.max(1, Math.round(s.dex||0));
+  s.might = Math.max(1, Math.round(s.might||0));
+  s.will = Math.max(1, Math.round(s.will||0));
+  s.cun = Math.max(1, Math.round(s.cun||0));
+  s.cha = Math.max(1, Math.round(s.cha||0));
+
+  recomputeDerivedPoolsNew(s);
+  return s;
+}
+
 var ARCHETYPES = {
   "A": { name:"Warrior",     up:["might","endu"], down:["cun","cha"] },
   "B": { name:"Rogue",       up:["dex","endu"],   down:["will","cha"] },
@@ -325,7 +521,10 @@ function tasEnsureStateAndPlayer(){
   tasEnsureState();
   if(state.playerList.length===0) tasCreateNewPlayer("Player");
   else for(var i=0;i<state.playerList.length;i++) tasCreateNewPlayer(state.playerList[i]);
+  // Ensure AI reference card exists
+  tasGetOrCreateRulesCard();
 }
+
 
 function tasCreateNewPlayer(plrName){
   tasEnsureState();
@@ -396,7 +595,7 @@ function tasGetOrCreateStatsCard(plrName){
 
   // Ensure the card's TRIGGERS/KEYS include common UI words so the model can always find it.
   // Requested words (comma-separated concept): character, menu, stats, stat, status, sheet
-  var desired=["character","menu","stats","stat","status","sheet"];
+  var desired=["you","your","yourself","a","an","the","player","character","menu","stats","stat","status","sheet"];
   if(sc){
     if(Array.isArray(sc.keys)){
       for(var i=0;i<desired.length;i++){
@@ -430,8 +629,118 @@ function tasGetOrCreateSkillsCard(plrName){
       sc.entry=sc.entry||"";
     }
   }
+  // Ensure the card's TRIGGERS/KEYS include high-frequency pronouns/articles so it's always in context.
+  var desired=["you","your","yourself","a","an","the","player","character","menu","stats","stat","status","sheet","skills","skill","ability","abilities"];
+  if(sc){
+    if(Array.isArray(sc.keys)){
+      for(var i=0;i<desired.length;i++){
+        if(sc.keys.indexOf(desired[i])<0) sc.keys.push(desired[i]);
+      }
+    } else if(typeof sc.keys==="string"){
+      for(var j=0;j<desired.length;j++){
+        if(sc.keys.toLowerCase().indexOf(desired[j])<0) sc.keys += ", "+desired[j];
+      }
+    }
+  }
+
   return sc;
 }
+
+function tasGetOrCreateDescriptionCard(){
+  if(!tasHasStoryCards()) return null;
+  var title="Description";
+  var sc=storyCards.find(function(c){return c.title===title;});
+  if(!sc){
+    addStoryCard(title,"Blank","Player Stats");
+    sc=storyCards.find(function(c){return c.title===title;});
+    if(sc){
+      sc.description="Auto-updated high-level description for the scenario/AI context.";
+    }
+  }
+  return sc||null;
+}
+
+function storeDescriptionToSC(){
+  tasEnsureStateAndPlayer();
+  if(!tasHasStoryCards()) return;
+  var sc=tasGetOrCreateDescriptionCard(); if(!sc) return;
+
+  var plr=state.players[state.playerList[0]];
+  var combat = state.combat && state.combat.status ? state.combat.status : "OUT_OF_COMBAT";
+  var target = (state.targeting && state.targeting.targetLabel) ? state.targeting.targetLabel : "None";
+
+  var lines=[];
+  lines.push("LAS active. Combat: "+combat+". Target: "+target+".");
+  if(plr && plr.resources){
+    lines.push("Player resources: Arousal "+fmt(plr.resources.arousal)+"/"+fmt(plr.resources.arousalMax)+", Energy "+fmt(plr.resources.energy)+"/"+fmt(plr.resources.energyMax)+", Mana "+fmt(plr.resources.mana)+"/"+fmt(plr.resources.manaMax)+".");
+  }
+  if(state.encounter && state.encounter.enemies && state.encounter.enemies.length){
+    var en = state.encounter.enemies.map(function(e,i){
+      var idx=i+1;
+      return idx+". "+e.name+" (Lust "+fmt(e.lust||0)+"/"+fmt(e.lustMax||20)+")";
+    });
+    lines.push("Enemies: "+en.join(" | "));
+  } else {
+    lines.push("No active enemies/encounter.");
+  }
+  sc.entry=lines.join("\n");
+}
+
+
+function tasGetOrCreateRulesCard(){
+  if(!tasHasStoryCards()) return null;
+  var title="LAS – System Rules & Stat Reference";
+  var sc=storyCards.find(function(c){return c.title===title;});
+  if(!sc){
+    addStoryCard(title,"Blank","Player Stats");
+    sc=storyCards.find(function(c){return c.title===title;});
+    if(sc){
+      sc.description =
+        "AI reference card for LAS (Lewd Auto Stats). Keep this in context.\n\n"+
+        "This card explains what stats/resources mean and how combat/climax/defeat works.\n";
+    }
+  }
+
+  // Keys/Triggers: keep always in context
+  var desired=["you","your","yourself","a","an","the","player","character","menu","stats","stat","status","sheet","skills","skill","combat","encounter","enemy","enemies","lust","stamina","mana","climax","defeat"];
+  if(sc){
+    if(Array.isArray(sc.keys)){
+      for(var i=0;i<desired.length;i++){
+        if(sc.keys.indexOf(desired[i])<0) sc.keys.push(desired[i]);
+      }
+    } else if(typeof sc.keys==="string"){
+      for(var j=0;j<desired.length;j++){
+        if(sc.keys.toLowerCase().indexOf(desired[j])<0) sc.keys += ", "+desired[j];
+      }
+    }
+
+    // Fill entry with a concise but complete rules summary
+    if(!sc.entry || !sc.entry.trim() || sc.entry.trim()==="Blank"){
+      sc.entry =
+        "STATS (6):\n"+
+        "- Endurance: increases Max Lust + Max Stamina.\n"+
+        "- Dexterity: improves physical hit/avoid; helps Lust reduction.\n"+
+        "- Might: improves physical damage; increases Max Stamina + Stamina Regen.\n"+
+        "- Willpower: increases Max Lust + Max Mana.\n"+
+        "- Cunning: improves magical hit/avoid; increases Mana Regen + Lust reduction.\n"+
+        "- Charisma: improves magical damage; increases Max Mana + Mana Regen.\n"+
+        "\n"+
+        "RESOURCES:\n"+
+        "- Lust fills when you take arousal/lust.\n"+
+        "- Stamina is the defeat meter (0 = exhausted/defeated).\n"+
+        "- Mana fuels magical/hybrid skills.\n"+
+        "\n"+
+        "COMBAT & CLIMAX:\n"+
+        "- When Lust reaches Max, you climax.\n"+
+        "- Climax drains Stamina (scaled to the hit).\n"+
+        "- After climax, Lust drops partially based on current Stamina.\n"+
+        "- Defeat only when Stamina reaches 0.\n";
+    }
+  }
+  return sc;
+}
+
+
 
 function tasGetOrCreateEncounterCard(){
   if(!tasHasStoryCards()) return null;
@@ -446,7 +755,7 @@ function tasGetOrCreateEncounterCard(){
         "Enemy: Name (#) (Type TYPE) (Lvl N) Lust X/Y, Stamina A/B (Status: ACTIVE/NEAR CLIMAX/EXHAUSTED) - Short description\n"+
         "Effects: Aphrodisiac x3; Restrained x1; ... (optional)\n\n"+
         "IMPORTANT:\n"+
-        "- Lust FILLS as they take lust-pressure.\n"+
+        "- Lust FILLS as they take lust.\n"+
         "- A climax happens when Lust reaches MAX (then Lust drops partially).\n"+
         "- A creature is only defeated when Stamina reaches 0.\n";
       sc.entry=sc.entry||"";
@@ -499,7 +808,7 @@ function storeStatsToSC(){
       "Class: "+plr.class_+"\n"+
       "Archetype: "+(plr.archetype||"N/A")+(ARCHETYPES[plr.archetype]?" ("+ARCHETYPES[plr.archetype].name+")":"")+"\n"+
       "LVL "+s.lvl+" (Exp: "+tasToFixed(s.exp,1)+")\n"+
-      "Class LVL "+(s.classLvl||1)+" (Class Exp: "+tasToFixed(s.classExp||0,1)+")\n"+
+      "Class LVL "+(s.classLvl||1)+"\n"+
       "Stat Points: "+(s.statPoints||0)+"\\n"+
       "Lust: "+tasToFixed(s.lust,1)+"/"+tasToFixed(s.maxLust,1)+"\n"+
       "Stamina: "+tasToFixed(s.stam,1)+"/"+tasToFixed(s.maxStam,1)+"\n"+
@@ -519,49 +828,6 @@ function storeStatsToSC(){
   });
 }
 
-function storeSkillsToSC(){
-  tasEnsureStateAndPlayer();
-  if(!tasHasStoryCards()) return;
-
-  state.playerList.forEach(function(plrName){
-    var plr=state.players[plrName]; if(!plr||!plr.skills) return;
-    var sc=tasGetOrCreateSkillsCard(plrName); if(!sc) return;
-
-    var out=[];
-    for(var i=0;i<plr.skills.name.length;i++){
-      var nm=plr.skills.name[i]; if(!nm) continue;
-      var tag=plr.skills.tag[i]||"General";
-      var tier=plr.skills.tier[i]||"T1";
-      var lvl=(plr.skills.lvl[i]||1).toFixed(2);
-      var uses=plr.skills.uses[i]||0;
-
-      var cs=plr.skills.costStam[i]||0;
-      var cm=plr.skills.costMana[i]||0;
-
-      var costParts=[];
-      if(cs) costParts.push(cs+" Stamina");
-      if(cm) costParts.push(cm+" Mana");
-      var costText=costParts.length?costParts.join(", "):"0";
-
-      var key = nm.toLowerCase();
-      plr.skills.keys[i]=[key];
-
-      var desc=(plr.skills.effect[i]||"").trim();
-
-      out.push(
-        "Skill: "+nm+
-        " (Tag "+tag+")"+
-        " (Tier "+tier+")"+
-        " (Lvl "+lvl+")"+
-        " (Uses "+uses+")"+
-        " (Cost: "+costText+")"+
-        " (Keys: "+key+")"+
-        (desc?" - "+desc:"")
-      );
-    }
-    sc.entry=out.join("\n");
-  });
-}
 
 function enemyStatusLabel(e){
   if(!e) return "ACTIVE";
@@ -577,6 +843,7 @@ function storeEncounterToSC(){
 
   var sc=tasGetOrCreateEncounterCard(); if(!sc) return;
   var enc=state.encounter;
+  if(!enc || !enc.enemies){ sc.entry=""; return; }
 
   var out=[];
   for(var i=0;i<enc.enemies.length;i++){
@@ -590,7 +857,15 @@ function storeEncounterToSC(){
       " (Status: "+enemyStatusLabel(e)+")"+
       " - "+(e.desc||"")
     );
-    var effLine = formatEffectsLine(e.effects||{});
+
+    // Show combined effects line (buffs + debuffs) without duplicating keys.
+    var combined = {};
+    if(e.buffs){ for(var kb in e.buffs){ if(e.buffs.hasOwnProperty(kb)) combined[kb]=e.buffs[kb]; } }
+    if(e.debuffs){ for(var kd in e.debuffs){ if(e.debuffs.hasOwnProperty(kd)) combined[kd]=e.debuffs[kd]; } }
+    // Back-compat:
+    if(e.effects){ for(var ke in e.effects){ if(e.effects.hasOwnProperty(ke)) combined[ke]=e.effects[ke]; } }
+
+    var effLine = formatEffectsLine(combined);
     if(effLine) out.push(effLine);
   }
   sc.entry=out.join("\n");
@@ -598,17 +873,24 @@ function storeEncounterToSC(){
 
 function storeCombatStateToSC(){
   if(!tasHasStoryCards()) return;
-  var sc=tasGetOrCreateCombatStateCard(); if(!sc) return;
-  sc.entry =
-    "Status: "+(state.combat.status||"OUT_OF_COMBAT")+"\n"+
-    "Had Enemies This Combat: "+(state.combat.hadEnemies? "YES":"NO")+"\n"+
-    "Last Resolution: "+(state.combat.lastResolution||"")+"\n"+
-    "Target: "+(state.targeting.targetLabel||"")+"\n";
-}
+  tasEnsureStateAndPlayer();
+  var plr=state.players[state.playerList[0]];
+  if(!plr) return;
 
-/* ---------------------------------------------------------------------------
-   LOAD SKILLS FROM SC
---------------------------------------------------------------------------- */
+  var sc=tasGetOrCreateCombatStateCard(); if(!sc) return;
+
+  var lines=[];
+  lines.push("Combat: "+(state.combatOn?"ON":"OFF"));
+  lines.push("Encounter: "+(state.encounter && state.encounter.active ? "ACTIVE" : "NONE"));
+  if(state.targeting && state.targeting.target){ lines.push("Target: "+state.targeting.target); }
+
+  if(plr.resources){
+    lines.push("Resources: Lust "+tasToFixed(plr.resources.lust||0,1)+"/"+tasToFixed(plr.resources.lustMax||0,1)+", Stamina "+tasToFixed(plr.resources.stamina||0,1)+"/"+tasToFixed(plr.resources.staminaMax||0,1)+", Mana "+tasToFixed(plr.resources.mana||0,1)+"/"+tasToFixed(plr.resources.manaMax||0,1));
+  }
+
+  // NOTE: Player buffs/debuffs are written ONLY to the Player Stats story card (source of truth).
+  sc.entry=lines.join("\n");
+}
 
 function lewdSkillsLoadFromSC(){
   tasEnsureStateAndPlayer();
@@ -621,7 +903,7 @@ function lewdSkillsLoadFromSC(){
 
     var re=/^Skill\s*:\s*(.+?)\s*\(Tag\s+([^)]+)\)\s*\(Tier\s+([^)]+)\)\s*\(Lvl\s*([0-9]+(?:\.[0-9]+)?)\)\s*\(Uses\s*([0-9]+)\)\s*\(Cost:\s*([^)]+)\)\s*\(Keys:\s*([^)]+)\)\s*(?:-\s*(.+))?$/i;
 
-    var N=[],T=[],R=[],L=[],U=[],K=[],E=[],CS=[],CM=[];
+    var N=[],T=[],R=[],L=[],U=[],K=[],E=[],CS=[],CM=[],A=[];
     sc.entry.split(/\r?\n/).forEach(function(rawLine){
       var line=(rawLine||"").trim(); if(!line) return;
       var m=re.exec(line); if(!m) return;
@@ -642,13 +924,86 @@ function lewdSkillsLoadFromSC(){
       var desc=(m[8]||"").trim();
 
       N.push(name);T.push(tag);R.push(tier);L.push(lvl);U.push(uses);
-      K.push(keys);E.push(desc);CS.push(cs);CM.push(cm);
+      K.push(keys);E.push(desc);CS.push(cs);CM.push(cm);A.push("");
     });
 
     if(N.length){
       plr.skills.name=N; plr.skills.tag=T; plr.skills.tier=R; plr.skills.lvl=L; plr.skills.uses=U;
-      plr.skills.keys=K; plr.skills.effect=E; plr.skills.costStam=CS; plr.skills.costMana=CM;
+      plr.skills.keys=K; plr.skills.effect=E;
+    plr.skills.adv=A; plr.skills.costStam=CS; plr.skills.costMana=CM;
     }
+  });
+}
+
+function storeSkillsToSC(){
+  tasEnsureStateAndPlayer();
+  if(!tasHasStoryCards()) return;
+
+  state.playerList.forEach(function(plrName){
+    var plr=state.players[plrName]; if(!plr||!plr.skills) return;
+    var sc=tasGetOrCreateSkillsCard(plrName); if(!sc) return;
+
+    var out=[];
+    for(var i=0;i<plr.skills.name.length;i++){
+      var nm=plr.skills.name[i]||"";
+      var tag=plr.skills.tag[i]||"General";
+      var tier=plr.skills.tier[i]||"T1";
+      var lvl=tasToFixed(plr.skills.lvl[i]||1,2);
+      var uses=(plr.skills.uses[i]||0);
+
+      var cs=Number(plr.skills.costStam[i]||0);
+      var cm=Number(plr.skills.costMana[i]||0);
+      var cl=Number(plr.skills.costLust[i]||0);
+
+      var costParts=[];
+      if(cs) costParts.push(cs+" Stamina");
+      if(cm) costParts.push(cm+" Mana");
+      if(cl) costParts.push(cl+" Lust");
+      var costText=costParts.length?costParts.join(", "):"0";
+
+      // keep keys stable and simple
+      var key = (nm||"").toLowerCase();
+      plr.skills.keys[i]=[key];
+
+      var desc=(plr.skills.effect[i]||"").trim();
+
+      // Remove any legacy duplicated injected strings
+      // (we now render Advanced/Drawback from dedicated fields)
+      desc = desc.replace(/\s*Advanced\s*:[^\.]*\.?/gi,"").trim();
+      desc = desc.replace(/\s*Drawback\s*:[^\.]*\.?/gi,"").trim();
+      desc = desc.replace(/\s+\s+/g," ").trim();
+
+      var applies = (plr.skills.applies && plr.skills.applies[i]) ? plr.skills.applies[i] : "";
+      if(applies){
+        if(desc) desc += " ";
+        desc += "Applies: "+applies+".";
+      }
+
+      var adv = (plr.skills.adv && plr.skills.adv[i]) ? plr.skills.adv[i] : "";
+      if(adv){
+        if(desc) desc += " ";
+        desc += "Advanced: applies "+adv+".";
+      }
+
+      var dNote = (plr.skills.drawbackNote && plr.skills.drawbackNote[i]) ? plr.skills.drawbackNote[i] : "";
+      if(dNote){
+        if(desc) desc += " ";
+        desc += "Drawback: "+dNote+".";
+      }
+
+      out.push(
+        "Skill: "+nm+
+        " (Tag "+tag+")"+
+        " (Tier "+tier+")"+
+        " (Lvl "+lvl+")"+
+        " (Uses "+uses+")"+
+        " (Cost: "+costText+")"+
+        " (Keys: "+key+")"+
+        (desc?" - "+desc:"")
+      );
+    }
+
+    sc.entry=out.join("\n");
   });
 }
 
@@ -715,8 +1070,10 @@ function tasMaybeInferClassFromText(text){
 
   var cls=null;
   if(!cls) cls=cap(/class selected:?[\s]+([A-Za-z][A-Za-z0-9 _-]{0,40})/i);
+  // Lightweight class-pick phrases (only when class is N/A)
+  if(!cls) cls=cap(/\byou\s+(?:choose|decide|decide\s+on)\s+([A-Za-z][A-Za-z0-9 _-]{0,40})\b/i);
   if(!cls) cls=cap(/\byou\s+(?:select|selected|choose|chose|pick|picked)\s+([A-Za-z][A-Za-z0-9 _-]{0,40})\s+(?:as\s+)?(?:your|the)\s+class\b/i);
-  if(!cls) cls=cap(/\/addclass\s+([A-Za-z][A-Za-z0-9 _-]{0,40})/i);
+  if(!cls) cls=cap(/\/lasaddclass\s+([A-Za-z][A-Za-z0-9 _-]{0,40})/i);
   if(!cls) return false;
 
   var cleaned=cls.replace(/\s+as$/i,"").trim();
@@ -759,12 +1116,29 @@ function isAoEName(nameLower){
   return /(aoe|area|all\s+enemies|everyone|entire|whole|room|chamber|zone|field|radius|circle|cone|spray|cloud|mist|fog|nova|wave|pulse|burst|storm|surge|shockwave|around\s+you|surrounding|envelop|envelops|fills\s+the\s+air|blankets\s+the\s+area|covers\s+the\s+room)/.test(nameLower);
 }
 
-function skillTagFromName(nameLower){
-  if(isAoEName(nameLower)) return "AoE";
-  if(/\btouch\b/.test(nameLower)) return "Hybrid";
-  if (/(bind|bondage|restrain|leash|tether|stun|hypno|charm|sleep|daze|silence|overload|impairs|curse|hex)/.test(nameLower)) return "Debuff";
-  if (/(bolt|blast|beam|ray|missile|orb|sigil|hex|curse|spell|incant|enchant|cloud|mist|pheromone|aura)/.test(nameLower)) return "Magical";
-  if (/(tickle|tease|caress|stroke|massage|grip|pin|spank|ride|grind|wrestle|hold|fuck|breed|thrust|finger)/.test(nameLower)) return "Physical";
+function skillTagFromName(name){
+  var n=(name||"").toLowerCase();
+
+  // Direct effect keywords -> tag
+  if(/aphrodis|fatigue|weaken|dull|sensitive|sensitivity/.test(n)) return "Debuff";
+  if(/relief|invigor|desensit|alluring/.test(n)) return "Buff";
+
+  // Explicit buff/defense
+  if (/(armor|armour|shield|barrier|guard|ward|aegis|protect|defend|fortify|harden|skin|slime\s+armor|slime\s+skin)/.test(n)) return "Buff";
+  if (/(buff|boost|haste|focus|empower|charm|enchant|blessing)/.test(n)) return "Buff";
+
+  // Explicit debuff/control
+  if (/(slow|stun|curse|hex|debuff)/.test(n)) return "Debuff";
+
+  // AoE
+  if (/(mist|cloud|spray|wave|burst|storm|nova|aura)/.test(n)) return "AoE";
+
+  // Magical leaning
+  if (/(bolt|spell|arcane|magic|mystic|pheromone|hypno)/.test(n)) return "Magical";
+
+  // Physical leaning
+  if (/(strike|slash|kick|punch|bash|shot|arrow|throw|slam|tackle)/.test(n)) return "Physical";
+
   return "General";
 }
 
@@ -774,25 +1148,44 @@ function skillTierFromName(nameLower){
   return "T1";
 }
 
-function baselineCost(tag,tier){
-  var baseStam=0, baseMana=0;
-
-  if(tag==="Physical"){ baseStam=randInt(1,2); baseMana=randInt(1,3); }
-  else if(tag==="Magical"){ baseStam=0; baseMana=6; }
-  else if(tag==="Hybrid"){ baseStam=1; baseMana=5; }
-  else if(tag==="AoE"){ baseStam=0; baseMana=8; }
-  else if(tag==="Debuff"){ baseStam=1; baseMana=7; }
-  else { baseStam=1; baseMana=4; }
-
-  if(tier==="T2"){ baseStam+=1; baseMana+=2; }
-  if(tier==="T3"){ baseStam+=1; baseMana+=4; }
-
-  baseStam = tasClamp(baseStam,0,6);
-  baseMana = tasClamp(baseMana,0,30);
-  return { stam: baseStam, mana: baseMana };
+function baselineCost(tag, tier){
+  // Base costs (requested):
+  // - Physical: ~2 Stamina
+  // - Magical: ~6-8 Mana
+  // - Hybrid: half of magical (rounded) + 1 Stamina
+  // - Buff/Debuff/AoE: treat as Magical baseline unless Physical-leaning
+  var t = (tier||"T1");
+  var tierMul = (t==="T1"?1:(t==="T2"?1.4:(t==="T3"?1.8:1)));
+  if(tag==="Physical"){
+    return {stam:Math.round(2*tierMul), mana:0};
+  }
+  if(tag==="Hybrid"){
+    return {stam:Math.max(1,Math.round(1*tierMul)), mana:Math.round(4*tierMul)}; // ~half magical
+  }
+  // Magical-ish
+  var baseMana = 7; // middle of 6-8
+  if(tag==="AoE") baseMana = 8;
+  if(tag==="Debuff") baseMana = 7;
+  if(tag==="Buff") baseMana = 7;
+  if(tag==="Magical") baseMana = 7;
+  return {stam:0, mana:Math.round(baseMana*tierMul)};
 }
 
 /* Expanded effect inference */
+
+function shortAdvancedEffectLabel(adv){
+  // Keep advanced effect labels very short for the Skills card
+  if(!adv) return "enhanced effect";
+  if(adv==="Aphrodisiac") return "applies Aphrodisiac";
+  if(adv==="Poison") return "applies Poison";
+  if(adv==="Burn") return "applies Burn";
+  if(adv==="Freeze") return "applies Freeze";
+  if(adv==="Shock") return "applies Shock";
+  if(adv==="Weaken") return "applies Weakened";
+  if(adv==="Charm") return "applies Charmed";
+  return "applies "+adv;
+}
+
 function inferAdvancedEffect(nameLower, effectLower){
   effectLower = (effectLower||"").toLowerCase();
   var combined = (nameLower||"") + " " + effectLower;
@@ -814,6 +1207,195 @@ function inferAdvancedEffect(nameLower, effectLower){
   return null;
 }
 
+
+
+function rollAdvancedStacksForSkill(tag, adv){
+  // Weighted stack range based on primary tag and effect type.
+  // % effects: stacks represent duration only.
+  // Flat OT effects: stacks represent strength and duration.
+  var isFlat = !!(EFFECT_DEFS[adv] && EFFECT_DEFS[adv].flat);
+  var min=1, max=2;
+
+  if(tag==="Buff" || tag==="Debuff"){
+    min=2; max=4;
+  } else if(tag==="AoE"){
+    min=1; max=3;
+  } else {
+    min=1; max=2;
+  }
+
+  // Stamina OT is expensive; keep stacks tighter unless dedicated Buff/Debuff.
+  if(adv==="Fatigue" || adv==="Invigorate"){
+    if(tag==="Buff" || tag==="Debuff"){ min=1; max=2; } else { min=1; max=1; }
+  }
+
+  // Weighted towards lower values
+  var r = Math.random();
+  if(r<0.55) return min;
+  if(r<0.85) return Math.min(max, min+1);
+  return max;
+}
+
+
+function inferEffectKeyFromText(text){
+  var t=(text||"").toLowerCase();
+
+  // Aphrodisiac (lust over time) - arousal atmospherics
+  if(t.indexOf("aphrodis")>=0) return "Aphrodisiac";
+  if(t.indexOf("pheromone")>=0) return "Aphrodisiac";
+  if(t.indexOf("intoxicat")>=0) return "Aphrodisiac";
+  if(t.indexOf("heady")>=0) return "Aphrodisiac";
+  if(t.indexOf("arous")>=0) return "Aphrodisiac";
+  if(t.indexOf("sultry")>=0) return "Aphrodisiac";
+
+  // Relief (lust heal over time) - calming / release
+  if(t.indexOf("relief")>=0) return "Relief";
+  if(t.indexOf("relieve")>=0) return "Relief";
+  if(t.indexOf("relieving")>=0) return "Relief";
+  if(t.indexOf("sooth")>=0) return "Relief";
+  if(t.indexOf("cool")>=0) return "Relief";
+  if(t.indexOf("cooling")>=0) return "Relief";
+  if(t.indexOf("calm")>=0) return "Relief";
+  if(t.indexOf("calming")>=0) return "Relief";
+  if(t.indexOf("release")>=0) return "Relief";
+  if(t.indexOf("releasing")>=0) return "Relief";
+  if(t.indexOf("clarity")>=0) return "Relief";
+
+  // Fatigue / Invigorate (stamina over time)
+  if(t.indexOf("fatigue")>=0) return "Fatigue";
+  if(t.indexOf("fatiguing")>=0) return "Fatigue";
+  if(t.indexOf("drain")>=0) return "Fatigue";
+  if(t.indexOf("draining")>=0) return "Fatigue";
+  if(t.indexOf("exhaust")>=0) return "Fatigue";
+  if(t.indexOf("exhausting")>=0) return "Fatigue";
+  if(t.indexOf("sap")>=0) return "Fatigue";
+  if(t.indexOf("sapping")>=0) return "Fatigue";
+
+  if(t.indexOf("invigor")>=0) return "Invigorate";
+  if(t.indexOf("invigorate")>=0) return "Invigorate";
+  if(t.indexOf("invigorating")>=0) return "Invigorate";
+  if(t.indexOf("energiz")>=0) return "Invigorate";
+  if(t.indexOf("revitalize")>=0) return "Invigorate";
+  if(t.indexOf("revitalizing")>=0) return "Invigorate";
+  if(t.indexOf("stimulat")>=0) return "Invigorate";
+  if(t.indexOf("stimulating")>=0) return "Invigorate";
+
+  // Alluring (lust damage dealt % up)
+  if(t.indexOf("allur")>=0) return "Alluring";
+  if(t.indexOf("seduce")>=0) return "Alluring";
+  if(t.indexOf("seductive")>=0) return "Alluring";
+  if(t.indexOf("entice")>=0) return "Alluring";
+  if(t.indexOf("enticing")>=0) return "Alluring";
+  if(t.indexOf("captivat")>=0) return "Alluring";
+  if(t.indexOf("mesmeriz")>=0) return "Alluring";
+
+  // Dulled (lust damage dealt % down)
+  if(t.indexOf("dull")>=0) return "Dulled";
+  if(t.indexOf("dulled")>=0) return "Dulled";
+  if(t.indexOf("dulling")>=0) return "Dulled";
+  if(t.indexOf("mute")>=0) return "Dulled";
+  if(t.indexOf("muted")>=0) return "Dulled";
+  if(t.indexOf("muting")>=0) return "Dulled";
+  if(t.indexOf("suppress")>=0) return "Dulled";
+  if(t.indexOf("suppressed")>=0) return "Dulled";
+  if(t.indexOf("suppression")>=0) return "Dulled";
+  if(t.indexOf("stifle")>=0) return "Dulled";
+  if(t.indexOf("stifled")>=0) return "Dulled";
+  if(t.indexOf("blunt")>=0) return "Dulled";
+  if(t.indexOf("blunted")>=0) return "Dulled";
+
+  // Sensitive / Desensitized (lust taken %)
+  if(t.indexOf("sensitiv")>=0 || t.indexOf("sensitivity")>=0) return "Sensitive";
+
+  // Sensitive via "exposing" family and vulnerability words
+  if(t.indexOf("expos")>=0) return "Sensitive";
+  if(t.indexOf("raw")>=0) return "Sensitive";
+  if(t.indexOf("bare")>=0) return "Sensitive";
+  if(t.indexOf("unshielded")>=0) return "Sensitive";
+  if(t.indexOf("stripped")>=0) return "Sensitive";
+  if(t.indexOf("stripping")>=0) return "Sensitive";
+  if(t.indexOf("open")>=0) return "Sensitive";
+  if(t.indexOf("opened")>=0) return "Sensitive";
+
+  // Desensitized via dulling/defensive sensation words
+  if(t.indexOf("desensit")>=0) return "Desensitized";
+  if(t.indexOf("numb")>=0) return "Desensitized";
+  if(t.indexOf("numbing")>=0) return "Desensitized";
+  if(t.indexOf("numbed")>=0) return "Desensitized";
+  if(t.indexOf("dulled-guard")>=0) return "Desensitized";
+  if(t.indexOf("harden")>=0) return "Desensitized";
+  if(t.indexOf("hardened")>=0) return "Desensitized";
+  if(t.indexOf("hardening")>=0) return "Desensitized";
+  if(t.indexOf("insulat")>=0) return "Desensitized";
+  if(t.indexOf("insulated")>=0) return "Desensitized";
+  if(t.indexOf("thick-skin")>=0) return "Desensitized";
+  if(t.indexOf("callous")>=0) return "Desensitized";
+  if(t.indexOf("calloused")>=0) return "Desensitized";
+
+  // Defensive armor/shield style buffs imply reduced lust taken
+  if(/armor|armour|shield|barrier|guard|ward|protect|defend|fortify|harden|skin/.test(t)) return "Desensitized";
+
+  // Stat effects (keywords)
+  if(t.indexOf("endurance")>=0) return "EnduranceUp";
+  if(t.indexOf("dexterity")>=0) return "DexterityUp";
+  if(t.indexOf("might")>=0) return "MightUp";
+  if(t.indexOf("willpower")>=0) return "WillpowerUp";
+  if(t.indexOf("cunning")>=0) return "CunningUp";
+  if(t.indexOf("charisma")>=0) return "CharismaUp";
+  return "";
+}
+
+function getRandomAdvancedEffectForSkill(tag){
+  // Any skill can roll an advanced effect; pools are biased by tag.
+  var pool = [];
+  if(tag==="Debuff"){
+    pool = ["Sensitive","Dulled","Aphrodisiac","Alluring","Relief"];
+  } else if(tag==="Buff"){
+    pool = ["Desensitized","Alluring","Relief","Invigorate"];
+  } else if(tag==="AoE"){
+    pool = ["Sensitive","Dulled","Aphrodisiac","Alluring","Relief"];
+  } else {
+    pool = ["Alluring","Dulled","Sensitive","Desensitized","Aphrodisiac","Relief"];
+  }
+
+  // Stamina ticks are rare and expensive; mostly for Buff/Debuff
+  if(tag==="Buff" || tag==="Debuff"){
+    if(Math.random()<0.15) pool.push("Invigorate");
+    if(Math.random()<0.15) pool.push("Fatigue");
+  }
+  return pool[Math.floor(Math.random()*pool.length)];
+}
+
+function getAdvancedExtraCost(tag, adv){
+  // Advanced surcharge is baked into base costs.
+  // Default advanced: +8 mana for magical-ish, +4 stamina for physical/hybrid.
+  // Stamina tick effects (Fatigue/Invigorate) are treated as high-tier advanced (3-5x).
+  var t = tag || "General";
+  var mult = 1;
+  if(adv==="Fatigue" || adv==="Invigorate"){
+    mult = 3 + Math.floor(Math.random()*3); // 3-5x
+  }
+  if(t==="Physical"){
+    return {stam:4*mult, mana:0};
+  }
+  if(t==="Hybrid"){
+    return {stam:2*mult, mana:4*mult};
+  }
+  // Magical-ish
+  return {stam:0, mana:8*mult};
+}
+
+function rollExtraStacksForBuffDebuff(){
+  // Weighted extra stacks beyond the initial 1.
+  // Diminishing chances: +1 (35%), +1 (18%), +1 (9%)
+  var extra = 0;
+  if(Math.random() < 0.35) extra++;
+  if(Math.random() < 0.18) extra++;
+  if(Math.random() < 0.09) extra++;
+  return extra;
+}
+
+
 function skillTypeForCombat(tag){
   if(tag==="Physical") return "Physical";
   if(tag==="Magical") return "Magical";
@@ -824,20 +1406,15 @@ function skillTypeForCombat(tag){
 }
 
 function defaultSkillDescription(name,tag,tier,cost){
-  var cParts=[];
-  if(cost.stam) cParts.push(cost.stam+" Stamina");
-  if(cost.mana) cParts.push(cost.mana+" Mana");
-  var cText=cParts.length?cParts.join(", "):"0";
-
-  var desc="Cost: "+cText+". Effect: "+
-    (tag==="Physical"?"physical technique":tag==="Magical"?"lust spell":tag==="Hybrid"?"enchanted touch-technique":tag==="AoE"?"area technique":tag==="Debuff"?"control technique":"technique")+
-    " that builds an enemy’s lust.";
-
-  var adv=inferAdvancedEffect(name.toLowerCase(), "");
-  if(adv){
-    desc+=" Advanced: applies "+adv+" stacks on hit.";
-  }
-  return desc;
+  // Description should NOT repeat costs; costs are displayed in the skill line itself.
+  if(tag==="Buff") return "defensive buff that protects you.";
+  var base=
+    (tag==="Physical"?"physical technique":
+     tag==="Magical"?"lust spell":
+     tag==="Hybrid"?"hybrid technique":
+     tag==="AoE"?"area technique":
+     tag==="Debuff"?"control technique":"technique");
+  return base+" that builds an enemy’s lust.";
 }
 
 /* Queue context injection so the model sees the skill text immediately */
@@ -849,11 +1426,39 @@ function queueSkillContextInject(skillName, desc){
   if(state.ctxInject.skillLines.length>3) state.ctxInject.skillLines.shift();
 }
 
+function tasEnsureSkills(plr){
+  if(!plr) return;
+  plr.skills = plr.skills || {};
+  // Core arrays
+  plr.skills.name = plr.skills.name || [];
+  plr.skills.tag  = plr.skills.tag  || [];
+  plr.skills.tier = plr.skills.tier || [];
+  plr.skills.lvl  = plr.skills.lvl  || [];
+  plr.skills.uses = plr.skills.uses || [];
+  plr.skills.keys = plr.skills.keys || [];
+  plr.skills.effect = plr.skills.effect || [];
+
+  // Costs
+  plr.skills.costStam = plr.skills.costStam || [];
+  plr.skills.costMana = plr.skills.costMana || [];
+  plr.skills.costLust = plr.skills.costLust || [];
+
+  // Buff/debuff metadata
+  plr.skills.adv = plr.skills.adv || [];
+  plr.skills.applies = plr.skills.applies || [];
+  plr.skills.drawbackNote = plr.skills.drawbackNote || [];
+  plr.skills._bakedAdv = plr.skills._bakedAdv || {};  plr.skills.drawbackDebuff = plr.skills.drawbackDebuff || [];
+}
+
+
 function ensureSkillFactory(plr,rawName){
   if(!rawName) return {created:false,idx:-1};
   var name=cleanSkillName(rawName); if(!name) return {created:false,idx:-1};
 
   var lowerName=name.toLowerCase().trim();
+  tasEnsureSkills(plr);
+  plr.skills.applies = plr.skills.applies || [];
+
   if(isGenericSkillName(lowerName)) return {created:false,idx:-1};
 
   var idx=-1;
@@ -877,9 +1482,26 @@ function ensureSkillFactory(plr,rawName){
   plr.skills.lvl.push(1);
   plr.skills.uses.push(0);
   plr.skills.keys.push(fullNameKey(name));
+  // Primary buff/debuff applied by this skill (separate from Advanced).
+  var appliesKey = "";
+  if(tag==="Buff" || tag==="Debuff"){
+    appliesKey = inferEffectKeyFromText(name) || "";
+    if(!appliesKey){
+      // Choose a sensible default pool by tag
+      if(tag==="Buff"){
+        var poolB=["Alluring","Desensitized","Relief","Invigorate","EnduranceUp","DexterityUp","MightUp","WillpowerUp","CunningUp","CharismaUp"];
+        appliesKey = poolB[Math.floor(Math.random()*poolB.length)];
+      } else {
+        var poolD=["Dulled","Sensitive","Aphrodisiac","Fatigue","EnduranceDown","DexterityDown","MightDown","WillpowerDown","CunningDown","CharismaDown"];
+        appliesKey = poolD[Math.floor(Math.random()*poolD.length)];
+      }
+    }
+  }
+  plr.skills.applies.push(appliesKey);
   plr.skills.effect.push(desc);
   plr.skills.costStam.push(cost.stam||0);
   plr.skills.costMana.push(cost.mana||0);
+  applyBakedAdvancedCosts(plr, plr.skills.name.length-1);
 
   queueSkillContextInject(name, desc);
 
@@ -1032,6 +1654,14 @@ function detectTargetFromText(text){
     if(idx) return {type:"index", index:idx, alsoDesc: lower};
   }
 
+
+// Pattern: "slime girl 3", "blue slime three", "monster 2" (number words or digits)
+m = lower.match(/\b((?:[a-z]+\s+){0,3}(?:slime\s+girl|slime\s+creature|slime|creature|monster|enemy|opponent|foe))\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b/);
+if(m && m[2]){
+  var idxN=parseOrdinalOrNumberToken(m[2]);
+  if(idxN) return {type:"index", index:idxN, alsoDesc: lower};
+}
+
   // Pattern: "enemy 2", "creature 3"
   m = lower.match(/\b(?:enemy|creature|monster|opponent|foe)\s*(?:creature\s*)?(\d+)\b/);
   if(m && m[1]){
@@ -1062,6 +1692,48 @@ function getTargetEnemyOrFirstAlive(){
     if(enc.enemies[j] && enc.enemies[j].stam>0) return enc.enemies[j];
   }
   return null;
+}
+
+function clearTargeting(){
+  state.targeting = state.targeting || {};
+  state.targeting.targetId = null;
+  state.targeting.targetLabel = null;
+  state.targeting.targetIndex = null;
+}
+
+function resetLustOutOfCombat(){
+  if(!state.players || !state.playerList || !state.playerList.length) return;
+  var plr = state.players[state.playerList[0]];
+  if(!plr) return;
+  // Lust-clear only (no stamina/mana refill)
+  if(plr.resources){
+    plr.resources.arousal = 0;
+    plr.resources.lust = 0;
+  }
+  if(plr.stats){
+    plr.stats.arousal = 0;
+    plr.stats.lust = 0;
+  }
+}
+
+function resetAllResourcesOutOfCombat(){
+  if(!state.players || !state.playerList || !state.playerList.length) return;
+  var plr = state.players[state.playerList[0]];
+  if(!plr) return;
+  // Full rest: refill stamina + mana and clear lust/arousal and ALL buffs/debuffs.
+  clearAllEffects();
+  if(plr.resources){
+    plr.resources.arousal = 0;
+    plr.resources.lust = 0;
+    if(plr.resources.staminaMax!==undefined) plr.resources.stamina = plr.resources.staminaMax;
+    if(plr.resources.manaMax!==undefined) plr.resources.mana = plr.resources.manaMax;
+  }
+  if(plr.stats){
+    plr.stats.arousal = 0;
+    plr.stats.lust = 0;
+    if(plr.stats.maxStam!==undefined) plr.stats.stam = plr.stats.maxStam;
+    if(plr.stats.maxMana!==undefined) plr.stats.mana = plr.stats.maxMana;
+  }
 }
 
 function getNthAliveEnemyAfter(enemy, n){
@@ -1373,9 +2045,10 @@ function manualClearAndSetEncounter(enemiesArray){
   } else {
     state.combat.status="OUT_OF_COMBAT";
     state.combat.hadEnemies=false;
-    state.targeting.targetId=null;
-    state.targeting.targetLabel="";
+    clearTargeting();
   }
+  // Always push the current encounter state into the Encounter story card
+  storeEncounterToSC();
 }
 
 /* ---------------------------------------------------------------------------
@@ -1408,15 +2081,22 @@ function avoidBonusFromEffects(effects){
   return tasClamp(e*0.03, 0, 0.25);
 }
 
+
+function lustDealtMultiplierFromEffects(effects){
+  var mult = 1.0;
+  if(!effects) return mult;
+  if(effects["Alluring"]>0) mult *= (1.0 + 0.20);
+  if(effects["Dulled"]>0) mult *= (1.0 - 0.20);
+  return tasClamp(mult, 0.2, 3.0);
+}
+
 function lustTakenMultiplierFromEffects(effects){
-  var o = effects["Overstimulated"]||0;
-  var v = effects["Vulnerable"]||0;
-  var g = effects["Guarded"]||0;
-
-  var up = tasClamp((o+v)*0.05, 0, 0.70);
-  var down = tasClamp(g*0.05, 0, 0.50);
-
-  return tasClamp(1 + up - down, 0.50, 2.00);
+  var mult = 1.0;
+  if(!effects) return mult;
+  // Duration-only % effects use stacks as duration; magnitude fixed in EFFECT_DEFS.
+  if(effects["Sensitive"]>0) mult *= (1.0 + 0.20);
+  if(effects["Desensitized"]>0) mult *= (1.0 - 0.20);
+  return tasClamp(mult, 0.2, 3.0);
 }
 
 function damageMultiplierFromEffects(effects){
@@ -1475,7 +2155,7 @@ function tickEffectsOnEntity(entity, isPlayer){
 
 function enemyApplyLust(enemy, amount, hitSizeForClimax){
   var msg="";
-  var mult = lustTakenMultiplierFromEffects(enemy.effects||{});
+  var mult = lustTakenMultiplierFromEffects(enemy.debuffs||enemy.effects||{});
   amount = Math.max(0, Math.round(amount * mult));
 
   enemy.lust = tasClamp(enemy.lust + amount, 0, enemy.maxLust);
@@ -1499,15 +2179,17 @@ function enemyApplyLust(enemy, amount, hitSizeForClimax){
 
   var ratio=(enemy.maxLust>0)?(enemy.lust/enemy.maxLust):0;
   if(ratio>=0.80){
-    msg+="\n<< "+enemy.name+" gains "+tasToFixed(amount,1)+" lust pressure and is NEAR CLIMAX (not defeated). (Enemy Lust: "+tasToFixed(enemy.lust,1)+"/"+tasToFixed(enemy.maxLust,1)+") >>";
+    msg+="\n<< "+enemy.name+" gains "+tasToFixed(amount,1)+" lust and is NEAR CLIMAX (not defeated). (Enemy Lust: "+tasToFixed(enemy.lust,1)+"/"+tasToFixed(enemy.maxLust,1)+") >>";
   } else {
-    msg+="\n<< "+enemy.name+" gains "+tasToFixed(amount,1)+" lust pressure. (Enemy Lust: "+tasToFixed(enemy.lust,1)+"/"+tasToFixed(enemy.maxLust,1)+") >>";
+    msg+="\n<< "+enemy.name+" gains "+tasToFixed(amount,1)+" lust. (Enemy Lust: "+tasToFixed(enemy.lust,1)+"/"+tasToFixed(enemy.maxLust,1)+") >>";
   }
   return msg;
 }
 
 function playerApplyLust(stats, amount, hitSizeForClimax){
   var msg="";
+  var mult = lustTakenMultiplierFromEffects((state.players[state.playerList[0]].debuffs||{}));
+  amount = Math.max(0, Math.round(amount * mult));
   stats.lust = tasClamp(stats.lust + amount, 0, stats.maxLust);
 
   if(stats.lust>=stats.maxLust){
@@ -1538,16 +2220,7 @@ function playerApplyLust(stats, amount, hitSizeForClimax){
 
 function classExpThreshold(classLvl){ return 50+(classLvl-1)*25; }
 
-function grantClassExp(stats, amount){
-  stats.classExp = (stats.classExp||0) + amount;
-  var msg="\n<< Class Exp +"+amount+" >>";
-  while(stats.classExp >= classExpThreshold(stats.classLvl||1)){
-    stats.classExp -= classExpThreshold(stats.classLvl||1);
-    stats.classLvl = (stats.classLvl||1) + 1;
-    msg+="\n<< Your class mastery deepens. Class LVL is now "+stats.classLvl+". >>";
-  }
-  return msg;
-}
+function grantClassExp(stats, amount){ /* class exp removed (single Exp only) */ return ""; }
 
 function playerExpThreshold(lvl){ return 100 + (lvl-1)*50; }
 
@@ -1621,6 +2294,8 @@ function computeDamageRange(tag, tier, skillLvl, attStats, attEffects){
   else dStat=(attStats.cha||0);
 
   var mid = base + (dStat*0.9) + (skillLvl||1)*1.2;
+  var mult = lustDealtMultiplierFromEffects(attEffects||{});
+  mid = mid * mult;
   var spread = 5 + Math.floor((skillLvl||1)/2);
 
   var minD = tasClamp(Math.floor(mid - spread), 4, 80);
@@ -1640,7 +2315,7 @@ function rollDamage(range){ return randInt(range.min, range.max); }
 --------------------------------------------------------------------------- */
 
 function playerInputAllowsSkillUse(lower){
-  if(lower.indexOf("/useskill")!==-1) return true;
+  if(lower.indexOf("/lasuseskill")!==-1) return true;
   if(tasContainsAny(lower, selectionVerbs)) return false;
   return tasContainsAny(lower, playerActionVerbs);
 }
@@ -1654,13 +2329,45 @@ function applyPlayerPaidCosts(plr, costStam, costMana){
   return {ok:true,msg:"\n<< Cost paid: -"+costStam+" Stamina, -"+costMana+" Mana. >>"};
 }
 
+function applySkillUseCosts(plr, skillIdx, costStam, costMana){
+  // Pay stamina/mana normally
+  var paid = applyPlayerPaidCosts(plr, costStam, costMana);
+  if(!paid.ok) return paid;
+
+  // Lust cost (single number) if present
+  var costLust = 0;
+  if(plr.skills && plr.skills.costLust && plr.skills.costLust[skillIdx]){
+    costLust = Number(plr.skills.costLust[skillIdx]||0);
+  }
+  if(costLust){
+    if(plr.stats){
+      plr.stats.lust = tasClamp((plr.stats.lust||0) - costLust, 0, (plr.stats.maxLust||999));
+    }
+    if(plr.resources){
+      plr.resources.lust = tasClamp((plr.resources.lust||0) - costLust, 0, (plr.resources.lustMax||999));
+    }
+    paid.msg = paid.msg.replace(">>", " -"+costLust+" Lust. >>");
+  }
+
+  // Self-debuff drawback if present
+  if(plr.skills && plr.skills.drawback && plr.skills.drawback[skillIdx]){
+    var d = plr.skills.drawback[skillIdx];
+    plr.debuffs = plr.debuffs || {};
+    plr.debuffs[d.name] = Math.max(plr.debuffs[d.name]||0, d.turns||1);
+  }
+
+  return paid;
+}
+
+
 /* ---------------------------------------------------------------------------
    BASE ATTACKS (skill-less)
 --------------------------------------------------------------------------- */
 
 function tryBaseAttack(plr, lower, rawText){
   if(tasContainsAny(lower, selectionVerbs)) return "";
-  if(!tasContainsAny(lower, baseAttackTriggers)) return "";
+  if(state.combat && state.combat.status!=="IN_COMBAT") return "";
+  if(!tasContainsAny(lower, attackWords)) return "";
 
   var msg="";
 
@@ -1688,7 +2395,7 @@ function tryBaseAttack(plr, lower, rawText){
     return msg;
   }
 
-  var chance = computeHitChance("Physical", plr.stats, enemy.stats, plr.debuffs||{}, enemy.effects||{});
+  var chance = computeHitChance("Physical", plr.stats, enemy.stats, plr.debuffs||{}, enemy.debuffs||enemy.effects||{});
   if(Math.random() > chance){
     msg += "\n<< You miss your opening (Physical hit chance "+Math.round(chance*100)+"%). >>";
     return msg;
@@ -1708,21 +2415,50 @@ function tryBaseAttack(plr, lower, rawText){
    SKILL USE (Player input only)
 --------------------------------------------------------------------------- */
 
-function applyAdvancedEffectOnHit(effectName, target, stacks, isPlayerTarget){
-  if(!effectName || stacks<=0) return "";
-
-  // Decide if it’s buff or debuff by name
-  var isBuff = (effectName==="Focused"||effectName==="Evasion"||effectName==="Guarded"||effectName==="Empowered");
-
-  if(isPlayerTarget){
-    if(isBuff) addStacks(target.buffs, effectName, stacks);
-    else addStacks(target.debuffs, effectName, stacks);
-    return "\n<< "+(isBuff?"Buff":"Debuff")+" applied: "+effectName+" x"+stacks+" >>";
+function applyPrimaryEffectOnCast(plr, effectKey, tag){
+  if(!plr || !effectKey) return "";
+  var def = EFFECT_DEFS[effectKey];
+  if(!def) return "";
+  var stacks = rollAdvancedStacksForSkill(tag||"General", effectKey);
+  if(def.kind && def.kind.indexOf("debuff")>=0){
+    plr.debuffs = plr.debuffs || {};
+    addEffectStacks(plr.debuffs, effectKey, stacks);
   } else {
-    // For enemies: treat everything as effects (debuff-like)
-    addStacks(target.effects, effectName, stacks);
-    return "\n<< Effect applied to "+target.name+": "+effectName+" x"+stacks+" >>";
+    plr.buffs = plr.buffs || {};
+    addEffectStacks(plr.buffs, effectKey, stacks);
   }
+  return "<< Applies: "+effectKey+" ("+stacks+" stacks). >>";
+}
+
+function applyAdvancedEffectOnHit(adv, enemy, stacks, toSelf){
+  if(!adv || !enemy || !stacks) return "";
+  var def = EFFECT_DEFS[adv];
+  if(!def) return "";
+
+  // Decide map based on sign and target
+  if(toSelf){
+    var plr = state.players[state.playerList[0]];
+    if(!plr) return "";
+    if(def.kind.indexOf("debuff")>=0){
+      plr.debuffs = plr.debuffs || {};
+      addEffectStacks(plr.debuffs, adv, stacks);
+    } else {
+      plr.buffs = plr.buffs || {};
+      addEffectStacks(plr.buffs, adv, stacks);
+    }
+    return "";
+  }
+
+  // Enemy: buffs are rare; most advanced effects are debuffs.
+  if(def.kind.indexOf("buff")>=0){
+    enemy.buffs = enemy.buffs || {};
+    addEffectStacks(enemy.buffs, adv, stacks);
+  } else {
+    enemy.debuffs = enemy.debuffs || {};
+    addEffectStacks(enemy.debuffs, adv, stacks);
+  }
+
+  return "";
 }
 
 
@@ -1750,6 +2486,92 @@ function chooseMilestoneAdvancedEffect(skillNameLower, tag){
   return ("Advanced: applies "+debuffs[h%debuffs.length]+" stacks on hit.");
 }
 
+
+
+function rollRandomDrawbackForAdvanced(tag, advKey){
+  // Returns {note, addMana, addStam, addLust, debuffKey}
+  var r = {note:"", addMana:0, addStam:0, addLust:0, debuffKey:""};
+
+  // Exception: stamina tick advanced effects can stand on their own as the "cost".
+  if(advKey==="Fatigue" || advKey==="Invigorate"){
+    if(Math.random()<0.25){
+      r.addMana = 2;
+      r.note = "strains you (+2 Mana)";
+    }
+    return r;
+  }
+
+  var pool = ["lust","mana","stam","debuff"];
+  var t = pool[Math.floor(Math.random()*pool.length)];
+
+  if(t==="lust"){
+    r.addLust = 4;
+    r.note = "costs 4 Lust";
+  }else if(t==="mana"){
+    r.addMana = 4;
+    r.note = "strains you (+4 Mana)";
+  }else if(t==="stam"){
+    r.addStam = 2;
+    r.note = "taxes you (+2 Stamina)";
+  }else{
+    // Any debuff as a drawback (applied to the caster on use)
+    var debuffs = ["Aphrodisiac","Fatigue","Dulled","Sensitive",
+                   "EnduranceDown","DexterityDown","MightDown","WillpowerDown","CunningDown","CharismaDown"];
+    r.debuffKey = debuffs[Math.floor(Math.random()*debuffs.length)];
+    r.note = "self-debuff: "+r.debuffKey;
+  }
+  return r;
+}
+
+function applyBakedAdvancedCosts(plr, idx){
+  if(!plr || !plr.skills || idx<0) return;
+
+  plr.skills.adv = plr.skills.adv || [];
+  plr.skills.drawbackNote = plr.skills.drawbackNote || [];
+  plr.skills.drawbackDebuff = plr.skills.drawbackDebuff || [];
+  plr.skills.costLust = plr.skills.costLust || [];
+  plr.skills.costMana = plr.skills.costMana || [];
+  plr.skills.costStam = plr.skills.costStam || [];
+
+  plr.skills._bakedAdv = plr.skills._bakedAdv || {};
+  if(plr.skills._bakedAdv[idx]) return;
+  plr.skills._bakedAdv[idx] = true;
+
+  // When is an advanced effect automatically included?
+  // During skill creation/learning: we roll here exactly once per skill (baked).
+  var tag = plr.skills.tag[idx]||"General";
+  var p = 0.18;
+  if(tag==="Buff" || tag==="Debuff") p = 0.28;
+  if(tag==="General") p = 0.14;
+
+  var adv = "";
+  if(Math.random() < p){
+    adv = getRandomAdvancedEffectForSkill(tag);
+  }else{
+    // small secondary chance
+    if(Math.random() < 0.09) adv = getRandomAdvancedEffectForSkill(tag);
+  }
+  if(!adv) return;
+
+  plr.skills.adv[idx] = adv;
+
+  // Bake advanced resource surcharge (no runtime add-ons)
+  var advCost = getAdvancedExtraCost(tag, adv);
+  plr.skills.costMana[idx] = Number(plr.skills.costMana[idx]||0) + Number(advCost.mana||0);
+  plr.skills.costStam[idx] = Number(plr.skills.costStam[idx]||0) + Number(advCost.stam||0);
+
+  // Randomized drawback (1:1): extra Lust/Mana/Stamina OR a self-debuff.
+  var dr = rollRandomDrawbackForAdvanced(tag, adv);
+
+  if(dr.addMana) plr.skills.costMana[idx] = Number(plr.skills.costMana[idx]||0) + Number(dr.addMana);
+  if(dr.addStam) plr.skills.costStam[idx] = Number(plr.skills.costStam[idx]||0) + Number(dr.addStam);
+  if(dr.addLust) plr.skills.costLust[idx] = Number(plr.skills.costLust[idx]||0) + Number(dr.addLust);
+
+  plr.skills.drawbackDebuff[idx] = dr.debuffKey || "";
+  plr.skills.drawbackNote[idx] = dr.note || "";
+}
+
+
 function ensureSkillMilestoneEffect(plr, idx, levelInt){
   if(!plr || !plr.skills || idx<0) return "";
   if(!skillAdvancedMilestone(levelInt)) return "";
@@ -1762,6 +2584,7 @@ function ensureSkillMilestoneEffect(plr, idx, levelInt){
 
   var add = chooseMilestoneAdvancedEffect(nm.toLowerCase(), tag);
   plr.skills.effect[idx] = (effect?effect+" ":"") + "[Milestone "+levelInt+"]: "+add;
+  applyBakedAdvancedCosts(plr, idx);
   // Also queue for context once, so the model sees the updated description
   queueSkillContextInject(cleanSkillName(nm), plr.skills.effect[idx]);
   return "\n<< "+cleanSkillName(nm)+" reaches LVL "+levelInt+" and evolves. >>";
@@ -1782,6 +2605,7 @@ function advancedEffectStacksFromSkillLvl(skillLvl, tier){
   if(tier==="T3") s+=2;
   return tasClamp(s,1,6);
 }
+
 
 function trySkillUse_PlayerOnly(text){
   if(!text||typeof text!=="string") return text;
@@ -1816,7 +2640,7 @@ function trySkillUse_PlayerOnly(text){
   var allowUse = playerInputAllowsSkillUse(lower);
 
   var forcedName=null;
-  var mForced=text.match(/\/useskill\s+([^\n\r]+)/i);
+  var mForced=text.match(/\/lasuseskill\s+([^\n\r]+)/i);
   if(mForced&&mForced[1]) forcedName=cleanSkillName(mForced[1]);
 
   if(!allowUse && !forcedName) return text;
@@ -1839,17 +2663,21 @@ function trySkillUse_PlayerOnly(text){
 
     var cs=plr.skills.costStam[i]||0;
     var cm=plr.skills.costMana[i]||0;
+    var adv = (plr.skills.adv && plr.skills.adv[i]) ? plr.skills.adv[i] : "";
+    // Advanced effects are baked into the skill's base costs at creation/level-up (no runtime add-ons).
 
-    var adv = inferAdvancedEffect(key, plr.skills.effect[i]||"");
-    if(adv && skillLvl < 2.5){
-      if(skillTypeForCombat(tag)==="Physical" || skillTypeForCombat(tag)==="Hybrid") cs += 1;
-      else cm += 2;
-      feedback += "\n<< Low-level drawback: advanced effect strains you (extra cost). >>";
-    }
-
-    var paid = applyPlayerPaidCosts(plr, cs, cm);
+    var paid = applySkillUseCosts(plr, i, cs, cm);
     feedback += paid.msg;
     if(!paid.ok) break;
+
+    // Drawback: optional self-debuff baked into the skill (applies on successful cast).
+    var db = (plr.skills.drawbackDebuff && plr.skills.drawbackDebuff[i]) ? plr.skills.drawbackDebuff[i] : "";
+    if(db){
+      plr.debuffs = plr.debuffs || {};
+      addEffectStacks(plr.debuffs, db, 2);
+      feedback += " << Drawback: self-debuff "+db+". >>";
+    }
+
 
     state.lastTurn.playerActed=true;
     state.combat.status="IN_COMBAT";
@@ -1861,6 +2689,27 @@ function trySkillUse_PlayerOnly(text){
     var newInt=Math.floor(skillLvl||1);
     if(newInt>prevInt){ feedback += "\n<< " + cleanSkillName(nm) + " LVL up ("+prevInt+"→"+newInt+"). >>"; }
     feedback += ensureSkillMilestoneEffect(plr, i, newInt);
+
+    // Buffs are self-targeted and should not require enemies.
+    if(tag==="Buff"){
+      var applies0 = (plr.skills.applies && plr.skills.applies[i]) ? plr.skills.applies[i] : "";
+      var msg0 = applyPrimaryEffectOnCast(plr, applies0, "Buff");
+      if(msg0) feedback += "\n"+msg0;
+      if(adv && Math.random()<0.40){
+        var defA = EFFECT_DEFS[adv];
+        var add = rollAdvancedStacksForSkill("Buff", adv);
+        if(defA && defA.kind && defA.kind.indexOf("debuff")>=0){
+          plr.debuffs = plr.debuffs || {};
+          addEffectStacks(plr.debuffs, adv, add);
+        } else {
+          plr.buffs = plr.buffs || {};
+          addEffectStacks(plr.buffs, adv, add);
+        }
+        feedback += "\n<< Advanced: "+shortAdvancedEffectLabel(adv)+". >>";
+      }
+      break;
+    }
+
 
     if(state.encounter.enemies.length===0){
       feedback += "\n<< No active enemies to affect. >>";
@@ -1899,6 +2748,27 @@ function trySkillUse_PlayerOnly(text){
     } else {
       var effectLower=(plr.skills.effect[i]||"").toLowerCase();
       var shots = skillExtraShots(skillLvl, effectLower);
+      if(tag==="Buff"){
+        plr.buffs = plr.buffs || {};
+        // Simple defensive buff (stacks/turns scale a bit with level)
+        var turns = 2 + Math.floor(skillLvl/2);
+        plr.buffs["Guarded"] = Math.max(plr.buffs["Guarded"]||0, turns);
+        feedback += "\n<< You brace yourself. (Guarded "+turns+"T) >>";
+        // Advanced effect on buff skills: apply to self (baked into the skill; chance to trigger on cast)
+        if(adv && Math.random()<0.40){
+          var defA = EFFECT_DEFS[adv];
+          var add = rollAdvancedStacksForSkill("Buff", adv);
+          if(defA && defA.kind && defA.kind.indexOf("debuff")>=0){
+            plr.debuffs = plr.debuffs || {};
+            addEffectStacks(plr.debuffs, adv, add);
+          } else {
+            plr.buffs = plr.buffs || {};
+            addEffectStacks(plr.buffs, adv, add);
+          }
+          feedback += "\n<< Advanced: "+shortAdvancedEffectLabel(adv)+". >>";
+        }
+        continue;
+      }
 
       var baseTarget=getTargetEnemyOrFirstAlive();
       if(!baseTarget){ feedback += "\n<< No active enemies to affect. >>"; break; }
@@ -1914,7 +2784,7 @@ function trySkillUse_PlayerOnly(text){
           if(!enemy) enemy=baseTarget;
         }
 
-        var chance2 = computeHitChance(combatType, plr.stats, enemy.stats, plr.debuffs||{}, enemy.effects||{});
+        var chance2 = computeHitChance(combatType, plr.stats, enemy.stats, plr.debuffs||{}, enemy.debuffs||enemy.effects||{});
         if(Math.random() > chance2){
           feedback += "\n<< Your technique fails to connect (Hit chance "+Math.round(chance2*100)+"%). >>";
           continue;
@@ -1927,7 +2797,7 @@ function trySkillUse_PlayerOnly(text){
         feedback += enemyApplyLust(enemy, dmg, dmg);
 
         if(adv){
-          var stacks2=advancedEffectStacksFromSkillLvl(skillLvl, tier);
+          var stacks2=rollAdvancedStacksForSkill(tag, adv);
           feedback += applyAdvancedEffectOnHit(adv, enemy, stacks2, false);
         }
       }
@@ -2053,7 +2923,7 @@ function playerNaturalRegen_LustFalls(mult, inCombat){
     var plr=state.players[plrName];
     if(!plr||!plr.stats) return;
     var s=plr.stats;
-    if(s.stam<=0) return;
+    if(inCombat && s.stam<=0) return;
 
     recomputeDerivedPoolsNew(s);
 
@@ -2071,7 +2941,7 @@ function playerNaturalRegen_StamMana(mult, inCombat){
     var plr=state.players[plrName];
     if(!plr||!plr.stats) return;
     var s=plr.stats;
-    if(s.stam<=0) return;
+    if(inCombat && s.stam<=0) return;
 
     recomputeDerivedPoolsNew(s);
 
@@ -2165,6 +3035,22 @@ function handleManualCommands(text){
   if(!plr) return text;
 
   var feedback="";
+  text=text.replace(/\/lasrest\b/gi,function(){
+    resetAllResourcesOutOfCombat();
+    feedback+="\n<< Full rest: stamina and mana refilled; lust cleared. >>";
+    return "";
+  });
+
+  text=text.replace(/\/lasrelease\b/gi,function(){
+    if(state.combat && state.combat.status==="IN_COMBAT"){
+      feedback+="\n<< Cannot /lasrelease during combat. >>";
+    } else {
+      resetLustOutOfCombat();
+      feedback+="\n<< Release: lust cleared. >>";
+    }
+    return "";
+  });
+
 
   text=text.replace(/\/lasaddskill\s+([^\n|]+?)(?:\s*\|\s*([^\n]+))?(?=$|\n)/gi,
     function(_m,name,descRaw){
@@ -2178,19 +3064,30 @@ function handleManualCommands(text){
     }
   );
 
-  text=text.replace(/\/clearenemies\b/gi,function(){
+  text=text.replace(/\/lascombat\s+off\b/gi,function(){
     manualClearAndSetEncounter([]);
-    state.combat.lastResolution="Encounter cleared manually.";
-    feedback+="\n<< Encounter cleared. >>";
+    state.combat.status="OUT_OF_COMBAT";
+    state.combat.hadEnemies=false;
+    state.combat.lastResolution="Combat turned off manually (encounter cleared).";
+    clearTargeting();
+    feedback+="\n<< Combat OFF. Encounter cleared. >>";
     return "";
   });
 
-  text=text.replace(/\/target\s+([^\s]+)\b/gi,function(_m,n){
+  text=text.replace(/\/lascombat\s+on\b/gi,function(){
+    state.combat.status="IN_COMBAT";
+    state.combat.lastResolution="Combat turned on manually.";
+    feedback+="\n<< Combat ON. >>";
+    return "";
+  });
+
+
+text=text.replace(/\/lastarget\s+([^\s]+)\b/gi,function(_m,n){
     var idx=parseOrdinalOrNumberToken(n);
     if(idx && idx>0 && setTargetIndexIfValid(idx)){
       feedback+="\n<< Target set: "+state.targeting.targetLabel+" >>";
     } else {
-      // also allow /target "blue slime" (descriptor)
+      // also allow /lastarget "blue slime" (descriptor)
       var rest=(n||"").toLowerCase();
       if(setTargetByBestDescriptorMatch(rest)){
         feedback+="\n<< Target set: "+state.targeting.targetLabel+" >>";
@@ -2201,10 +3098,10 @@ function handleManualCommands(text){
     return "";
   });
 
-  text=text.replace(/\/addenemy\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
+  text=text.replace(/\/lasaddenemy\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
     var parts=parseEncounterParts(arg||"");
     if(!parts){
-      feedback+="\n<< Add enemy parse failed. Example: /addenemy x2 small blue slime girls >>";
+      feedback+="\n<< Add enemy parse failed. Example: /lasaddenemy x2 small blue slime girls >>";
       return "";
     }
 
@@ -2229,7 +3126,7 @@ function handleManualCommands(text){
     return "";
   });
 
-  text=text.replace(/\/scanencounter\b/gi,function(){
+  text=text.replace(/\/lasscanencounter\b/gi,function(){
     state.flags.forceEncounterScan=true;
     feedback+="\n<< Encounter scan armed: the next AI output will be scanned for enemies. >>";
     return "";
@@ -2256,30 +3153,6 @@ function handleManualCommands(text){
 
     manualClearAndSetEncounter(enemies);
     feedback+="\n<< Encounter set: "+enemies.length+" enemies. >>";
-    return "";
-  });
-
-  text=text.replace(/\/setmixed\s+([^\n]+?)(?=$|\n)/gi,function(_m,arg){
-    var parts=parseEncounterParts(arg||"");
-    if(!parts){
-      feedback+="\n<< Mixed encounter parse failed. Example: /setmixed two small blue slimes, one large pink slime >>";
-      return "";
-    }
-
-    var plrLvl=(plr&&plr.stats&&plr.stats.lvl)?plr.stats.lvl:1;
-    var enemies=[];
-    var idx=0;
-
-    for(var pi=0;pi<parts.length;pi++){
-      var d=parts[pi];
-      for(var c=0;c<d.count;c++){
-        enemies.push(makeEnemyForType(d.type,plrLvl,idx,null,d));
-        idx++;
-      }
-    }
-
-    manualClearAndSetEncounter(enemies);
-    feedback+="\n<< Mixed encounter set: "+enemies.length+" enemies. >>";
     return "";
   });
 
@@ -2442,6 +3315,26 @@ tasEnsureStateAndPlayer();
 
   state.lastPlayerInputLower = safeLower(text);
 
+  // -----------------------------------------------------------------------
+  // OUT-OF-COMBAT REST / RELEASE (silent background handling; no output spam)
+  // -----------------------------------------------------------------------
+  var inCombat = (state.combat.status==="IN_COMBAT" && state.encounter && state.encounter.enemies && state.encounter.enemies.length>0);
+
+  if(!inCombat){
+    var lowerInput = state.lastPlayerInputLower || (text||"").toLowerCase() || "";
+    // Strict rest words: full resource reset (stamina + mana + lust/arousal).
+    var restRe = /\b(rest|sleep|nap|doze|recover|camp|relax|meditate)\b/i;
+    if(restRe.test(lowerInput)){
+      resetAllResourcesOutOfCombat();
+      state.flags = state.flags || {};
+      state.flags._didOutOfCombatRestReset = true;
+    } else if(tasContainsAny(lowerInput, sexWords)){
+      // Out-of-combat only: lust-only rest ("release").
+      resetLustOutOfCombat();
+      state.flags = state.flags || {};
+      state.flags._didOutOfCombatLustReset = true;
+    }
+  }
   text=handleManualCommands(text);
 
   // targeting changes may be embedded in a single action
@@ -2462,6 +3355,8 @@ tasEnsureStateAndPlayer();
 
   storeStatsToSC();
   storeSkillsToSC();
+  storeDescriptionToSC();
+  // Advance buff/debuff ticks once per input (in and out of combat).
   storeEncounterToSC();
   storeCombatStateToSC();
 
@@ -2522,6 +3417,7 @@ state.lastTurn.enemyActedInOutput=false;
 
   storeStatsToSC();
   storeSkillsToSC();
+  storeDescriptionToSC();
   storeEncounterToSC();
   storeCombatStateToSC();
 
@@ -2658,7 +3554,7 @@ function buildHelpPanel_TASLEWD(topic){
 "- Cunning: mental finesse; magical hit/avoid; boosts Mana regen + Lust reduction\n" +
 "- Charisma: mental force; boosts magical damage + Max Mana + Mana regen\n\n" +
 "RESOURCES\n" +
-"- Lust: fills when you take arousal/lust pressure. At max, you climax.\n" +
+"- Lust: fills when you take arousal/lust. At max, you climax.\n" +
 "- Stamina: your 'health' equivalent. Climax drains stamina. At 0 stamina, you're defeated.\n" +
 "- Mana: fuels magical/hybrid skills.\n\n" +
 "CLIMAX & DEFEAT\n" +
@@ -2698,14 +3594,21 @@ function buildHelpPanel_TASLEWD(topic){
 "  Example: /lasspend 3 charisma 1 endurance\n" +
 "- /laslvlupplayer [N]\n" +
 "- /laslvlupskill \"<Skill Name>\" [N]\n" +
-"- /lassetarchetype <A|B|C|D|E|F>\n\n" +
+"- /lassetarchetype <A|B|C|D|E|F>\n" +
+"- /lasaddclass <Class Name>\n\n" +
 "Skills:\n" +
 "- /lasaddskill \"<Skill Name>\" <physical|magical|hybrid> <tier T1|T2|T3|T4>\n" +
 "- /laslistskills\n\n" +
 "Encounters:\n" +
 "- /lassetencounter <free text>\n" +
 "- /laslistenemies\n" +
-"- /lasclearencounter\n\n" +
+"- /lascombat off\n" +
+"- /lasrest (full rest: refill stamina/mana, clear lust)\n" +
+"- /lasrelease (lust-only rest; out of combat)\n" +
+"- /lasaddenemy <name/desc>\n" +
+"- /lastarget <#|ordinal|descriptor>\n" +
+"- /lasscanencounter\n\n" +
+
 "Combat:\n" +
 "- /lascombat on\n" +
 "- /lascombat off\n"
@@ -2715,108 +3618,164 @@ function buildHelpPanel_TASLEWD(topic){
   // ------------------------- STATS -------------------------
   if(t.indexOf("/lashelp stats") === 0){
     return wrap(
-"STATS / RESOURCES\n\n" +
-"Stats: Endurance, Dexterity, Might, Willpower, Cunning, Charisma\n\n" +
+"STATS / RESOURCES\n" +
+"\n" +
+"Stats: Endurance, Dexterity, Might, Willpower, Cunning, Charisma\n" +
+"\n" +
 "Derived maximums:\n" +
 "- Max Lust = f(Endurance, Willpower)\n" +
 "- Max Stamina = f(Endurance, Might)\n" +
-"- Max Mana = f(Willpower, Charisma)\n\n" +
-"Regen (out of combat):\n" +
+"- Max Mana = f(Willpower, Charisma)\n" +
+"\n" +
+"Regen (silent / background):\n" +
+"- Out of combat: full regen values\n" +
+"- In combat: 1/10 regen values\n" +
 "- Stamina Regen = f(Might, Dexterity)\n" +
 "- Mana Regen = f(Cunning, Charisma)\n" +
 "- Lust reduction Regen = f(Cunning, Dexterity)\n" +
-"In combat regen = 1/10 of those values.\n\n" +
+"\n" +
+"Outside-combat special resets:\n" +
+"- Rest words (sleep/nap/rest/etc.) fully restore stamina + mana and reset lust.\n" +
+"- Release words (masturbate/cum/orgasm/etc.) reset lust only.\n" +
+"\n" +
 "Climax:\n" +
-"- Lust fills on pressure; at Max → climax drains stamina; lust drops partially.\n" +
+"- Lust fills on pressure; at Max you climax, lose stamina, and lust drops partially.\n" +
 "Defeat:\n" +
-"- Stamina reaches 0.\n"
+"- Stamina reaches 0.\n" +
+"\n"
     );
   }
 
   // ------------------------- COMBAT -------------------------
   if(t.indexOf("/lashelp combat") === 0){
     return wrap(
-"COMBAT\n\n" +
+"COMBAT\n" +
+"\n" +
 "Start:\n" +
 "- Usually when an encounter is detected or when you /lassetencounter.\n" +
-"- Auto detection can miss — /lassetencounter is recommended.\n\n" +
+"- Auto detection can miss — /lassetencounter is recommended.\n" +
+"\n" +
 "Basic attack language (examples):\n" +
-"tease, tickle, fuck, thrust, finger, kiss, grope, stroke, grind, ride, edge, spank, bind\n\n" +
+"tease, tickle, fuck, thrust, finger, kiss, grope, stroke, grind, ride, edge, spank, bind\n" +
+"\n" +
 "Skill usage language:\n" +
-"- “cast <Skill Name>”\n" +
-"- “use <Skill Name>”\n" +
-"- or type the exact full skill name.\n\n" +
+"- \"cast <Skill Name>\"\n" +
+"- \"use <Skill Name>\"\n" +
+"- or type the exact full skill name.\n" +
+"\n" +
 "Targeting language:\n" +
-"- “enemy 2”, “slime creature 3”, “third slime”, “the second one”, etc.\n\n" +
+"- Numerals: \"enemy 2\", \"slime creature 3\"\n" +
+"- Ordinals: \"second\", \"third\"\n" +
+"- Descriptors: \"the large pink slime\", \"the small blue one\"\n" +
+"(If a target change and an attack happen in one sentence, explicit target wins.)\n" +
+"\n" +
+"Climax:\n" +
+"- Reaching Max Lust triggers a climax that drains stamina; lust then drops partially.\n" +
+"\n" +
 "End:\n" +
 "- All enemies stamina 0 → combat over.\n" +
-"- Player stamina 0 → player defeated.\n"
+"- Player stamina 0 → player defeated.\n" +
+"\n"
     );
   }
 
   // ------------------------- SKILLS -------------------------
   if(t.indexOf("/lashelp skills") === 0){
     return wrap(
-"SKILLS\n\n" +
+"SKILLS\n" +
+"\n" +
 "Manual add (recommended):\n" +
-"- /lasaddskill \"<Skill Name>\" <physical|magical|hybrid> <tier T1|T2|T3|T4>\n\n" +
+"- /lasaddskill \"<Skill Name>\" <physical|magical|hybrid> <tier T1|T2|T3|T4>\n" +
+"\n" +
 "Learning detection (if enabled):\n" +
-"- Phrases like “learn”, “unlock”, “gain skill/spell”, “acquired” near a named skill.\n\n" +
+"- Phrases like \"learn\", \"unlock\", \"gain\", \"acquired\" near a named skill.\n" +
+"- When a skill is learned, LAS injects its description into context for the AI.\n" +
+"\n" +
 "Casting detection:\n" +
-"- “cast <Skill Name>”, “use <Skill Name>”, or the exact full skill name.\n\n" +
+"- \"cast <Skill Name>\", \"use <Skill Name>\", or the exact full skill name.\n" +
+"\n" +
 "Scaling:\n" +
 "- Physical: hit=Dexterity, damage=Might\n" +
 "- Magical: hit=Cunning, damage=Charisma\n" +
-"- Hybrid: hit=Dexterity, damage=Charisma\n\n" +
+"- Hybrid: hit=Dexterity, damage=Charisma\n" +
+"\n" +
 "Leveling:\n" +
 "- Small damage boost per level.\n" +
-"- Every 5 levels: advanced effect (buff/debuff/extra shot). Drawbacks remain.\n"
+"- Every 5 levels: advanced effect (buff/debuff/extra shot). Drawbacks remain.\n" +
+"\n"
     );
   }
 
   // ------------------------- ENCOUNTERS -------------------------
   if(t.indexOf("/lashelp encounter") === 0){
     return wrap(
-"ENCOUNTERS / ENEMY TRACKING\n\n" +
+"ENCOUNTERS / ENEMY TRACKING\n" +
+"\n" +
 "Auto encounter detection is NOT perfect.\n" +
-"Strongly recommended: use /lassetencounter.\n\n" +
+"Strongly recommended: use /lassetencounter.\n" +
+"\n" +
 "Manual:\n" +
 "- /lassetencounter 2 small blue slime girls and 1 large pink slime\n" +
 "- /laslistenemies\n" +
-"- /lasclearencounter\n\n" +
+"- /lascombat off\n" +
+"\n" +
 "Auto detection looks for encounter words like:\n" +
 "enemy, creature, monster, opponent, stranger, attacker\n" +
-"then attempts to pull a name/descriptor.\n\n" +
-"Enemies are generated below human stats at equal level (roughly 20–40%).\n"
+"then attempts to pull a name/descriptor.\n" +
+"\n" +
+"Enemies are generated below human stats at equal level (roughly 20–40%).\n" +
+"\n"
     );
   }
 
   // ------------------------- BUFFS -------------------------
-  if(t.indexOf("/lashelp buffs") === 0){
+  // ------------------------- BUFFS -------------------------
+  if(t.indexOf("/lashelp buffs")===0){
     return wrap(
-"BUFFS / DEBUFFS (STACKS)\n\n" +
-"Single number = strength + duration.\n" +
-"Example: 3 stacks deals/affects at 3 power and lasts 3 turns.\n" +
-"Stacks tick down by 1 at end of turn.\n\n" +
-"Player buffs go on Player Stats card.\n" +
-"Enemy debuffs go on Encounter card.\n"
+      "BUFFS / DEBUFFS\n\n"+
+      "Effects are stored as key -> stacks (single integer).\n"+
+      "% effects: stacks = duration only (fixed magnitude).\n"+
+      "Flat OT: stacks = strength AND duration; each tick uses current stacks then reduces by 1.\n\n"+
+      "LUST OVER-TIME (FLAT)\n"+
+      "- Aphrodisiac (+debuff): lust taken over time (tick adds lust).\n"+
+      "- Relief (+buff): lust healed over time (tick reduces lust).\n\n"+
+      "STAMINA OVER-TIME (FLAT, RARE / EXPENSIVE)\n"+
+      "- Fatigue (+debuff): stamina drain over time.\n"+
+      "- Invigorate (+buff): stamina recovery over time.\n\n"+
+      "LUST OUTPUT (%; DURATION STACKS)\n"+
+      "- Alluring (%buff): lust dealt +20%.\n"+
+      "- Dulled (%debuff): lust dealt -20%.\n\n"+
+      "SENSITIVITY (%; DURATION STACKS)\n"+
+      "- Sensitive (%debuff): lust taken +20%.\n"+
+      "- Desensitized (%buff): lust taken -20%.\n\n"+
+      "PLAYER STATS (%; DURATION STACKS; ROUNDED)\n"+
+      "- EnduranceUp/Down, DexterityUp/Down, MightUp/Down, WillpowerUp/Down, CunningUp/Down, CharismaUp/Down (±15%).\n\n"+
+      "Ticks advance once per input (in and out of combat). Full rest clears all buffs/debuffs.\n"
     );
   }
 
   // ------------------------- STORYCARDS -------------------------
   if(t.indexOf("/lashelp storycards") === 0){
     return wrap(
-"STORY CARDS\n\n" +
-"This system stores state in story cards (arrays), not objects.\n\n" +
+"STORY CARDS\n" +
+"\n" +
+"This system stores state in story cards (arrays), not objects.\n" +
+"\n" +
 "Typical cards:\n" +
 "- Player Stats\n" +
 "- Skills\n" +
 "- Encounter / Enemies\n" +
-"- Combat State\n\n" +
+"- Combat State\n" +
+"- System Rules & Stat Reference (explains LAS rules/stats to the AI)\n" +
+"\n" +
+"Note:\n" +
+"- Some cards use very common trigger words (you/your/the/a) to stay in context.\n" +
+"\n" +
 "Manual recovery tools:\n" +
-"- /lassetencounter, /lasclearencounter\n" +
+"- /lassetencounter, /lascombat off\n" +
 "- /lasaddskill, /laslistskills\n" +
-"- /lassetarchetype\n"
+"- /lassetarchetype\n" +
+"\n"
     );
   }
 
